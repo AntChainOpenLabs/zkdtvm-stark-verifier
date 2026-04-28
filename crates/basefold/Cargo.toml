@@ -1,0 +1,26 @@
+[package]
+name = "dt-basefold"
+description = "Basefold multilinear PCS (verification only) for zkdtvm-stark-verifier."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "basefold"
+path = "src/lib.rs"
+
+[dependencies]
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-merkle-tree.workspace = true
+p3-commit.workspace = true
+p3-fri.workspace = true
+p3-challenger.workspace = true
+p3-util.workspace = true
+p3-maybe-rayon.workspace = true
+
+bincode.workspace = true
+itertools.workspace = true
+rayon.workspace = true
+serde.workspace = true
+tracing.workspace = true

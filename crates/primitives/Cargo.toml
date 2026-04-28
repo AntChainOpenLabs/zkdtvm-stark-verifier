@@ -1,0 +1,26 @@
+[package]
+name = "dt-primitives"
+description = "Primitive types and hashing for zkdtvm-stark-verifier."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+blake3 = { workspace = true }
+cfg-if = "1.0.0"
+hex = "0.4.3"
+lazy_static = "1.5.0"
+num-bigint = { version = "0.4.6", default-features = false }
+p3-field = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-poseidon2 = { workspace = true }
+p3-symmetric = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+default = []
+koalabear = []
+babybear = []

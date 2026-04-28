@@ -1,0 +1,11 @@
+# Cargo build
+**/target
+
+# Cargo config
+.cargo
+
+# MacOS nuisances
+.DS_Store
+
+# Environment
+.env

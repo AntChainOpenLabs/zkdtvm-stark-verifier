@@ -1,0 +1,47 @@
+[package]
+name = "dt-stark"
+description = "STARK machine + Sumcheck shard verifier for zkdtvm-stark-verifier."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dt-derive = { workspace = true }
+dt-primitives = { workspace = true }
+dt-basefold = { workspace = true }
+
+p3-air.workspace = true
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-uni-stark.workspace = true
+p3-util.workspace = true
+p3-challenger.workspace = true
+p3-commit.workspace = true
+p3-maybe-rayon.workspace = true
+p3-baby-bear.workspace = true
+p3-koala-bear.workspace = true
+p3-dft.workspace = true
+p3-fri.workspace = true
+p3-merkle-tree.workspace = true
+p3-symmetric.workspace = true
+p3-poseidon2.workspace = true
+log.workspace = true
+
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hashbrown.workspace = true
+itertools.workspace = true
+tracing.workspace = true
+arrayref.workspace = true
+num-bigint.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+num-traits.workspace = true
+enum-map.workspace = true
+sysinfo = "0.30.13"
+rayon-scan = "0.1.1"
+
+[features]
+default = ["koalabear"]
+koalabear = ["dt-primitives/koalabear"]

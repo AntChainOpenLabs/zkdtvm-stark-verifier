@@ -1,0 +1,19 @@
+[package]
+name = "zkdtvm-stark-verifier-cli"
+description = "CLI tool for verifying zkdtvm STARK proofs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zkdtvm-stark-verifier"
+path = "src/main.rs"
+
+[dependencies]
+zkdtvm-stark-verifier = { workspace = true }
+
+bincode = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

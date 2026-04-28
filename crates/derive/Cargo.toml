@@ -1,0 +1,13 @@
+[package]
+name = "dt-derive"
+description = "Proc macros for zkdtvm-stark-verifier (MachineAir, AlignedBorrow)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }
