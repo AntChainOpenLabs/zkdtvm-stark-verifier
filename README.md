@@ -50,6 +50,25 @@ fn verify(proof: &DTReduceProof<_>, vk: &DTVerifyingKey) {
 }
 ```
 
+For integrators that only hold serialized bytes and a pre-computed VK digest
+(rather than a full `DTVerifyingKey`), a byte-oriented entry point is also
+exposed:
+
+```rust
+use zkdtvm_stark_verifier::{verify_compressed_bytes, VerifyError};
+
+fn verify_bytes(proof_bytes: &[u8], vk_hash_bytes: &[u8]) -> Result<(), VerifyError> {
+    // - `proof_bytes`:   bincode-serialized `DTReduceProof<InnerSC>`
+    // - `vk_hash_bytes`: bincode-serialized `[SCField; DIGEST_SIZE]` (32 bytes)
+    verify_compressed_bytes(proof_bytes, vk_hash_bytes)
+}
+```
+
+Internally `verify_compressed_bytes` deserializes both inputs and delegates to
+`verify_compressed_raw(&proof, &vk_hash)`, which runs the same machine-level
+verification as `verify_compressed` and additionally checks that the proof's
+public-values `dt_vk_digest` matches the supplied digest.
+
 ### CLI
 
 ```bash
@@ -78,6 +97,14 @@ Three pre-generated binary fixtures are included in the project root:
 | `proof.bin`   | Compressed proof (fibonacci(10))                       |
 | `vk.bin`      | Verifying key                                          |
 | `message.bin` | Message payload                                        |
+
+Additionally, byte-oriented fixtures for `verify_compressed_bytes` live under
+`crates/verify/tests/fixtures/example_{1..=4}/`. Each directory contains:
+
+| File        | Description                                                                         |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `proof.bin` | bincode-serialized `DTReduceProof<InnerSC>`                                         |
+| `vk.bin`    | bincode-serialized `[SCField; DIGEST_SIZE]` (the VK Poseidon2 digest, 32 bytes)     |
 
 ## Design Decisions
 
