@@ -86,7 +86,7 @@ Three pre-generated binary fixtures are included in the project root:
 
 ## Acknowledgements
 
-This project would not have been possible without the following open-source projects:
+zkdtvm-stark-verifier is the standalone verification component of our zkdtvm system, a zero-knowledge virtual machine built for verifiable computation. During the development of zkdtvm, we relied heavily on and learned from several outstanding open-source projects in the ZK ecosystem. We would like to express our gratitude:
 
 - [Plonky3](https://github.com/Plonky3/Plonky3): Our STARK proving and verification stack is built on top of the Plonky3 library. We forked and extended several of its core crates — including field arithmetic, matrix operations, FRI, and Merkle tree primitives — to support the specific needs of our proof system. We are grateful for its clean, modular architecture at the polynomial IOP level.
 
