@@ -84,6 +84,14 @@ Three pre-generated binary fixtures are included in the project root:
 - **Field**: KoalaBear (31-bit prime) — the only supported field
 - **PCS**: Basefold — the only supported polynomial commitment scheme
 
+## Acknowledgements
+
+This project would not have been possible without the following open-source projects:
+
+- [Plonky3](https://github.com/Plonky3/Plonky3): Our STARK proving and verification stack is built on top of the Plonky3 library. We forked and extended several of its core crates — including field arithmetic, matrix operations, FRI, and Merkle tree primitives — to support the specific needs of our proof system. We are grateful for its clean, modular architecture at the polynomial IOP level.
+
+- [SP1](https://github.com/succinctlabs/sp1): The overall zkVM architecture of this project draws significant inspiration from SP1. Many of our design choices around the STARK machine structure, recursion framework, AIR chip layout, and proof composition pipeline were informed by studying SP1's implementation. We appreciate the Succinct team for open-sourcing their work and advancing the state of zkVM engineering.
+
 ## License
 
 This project is licensed under the [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
