@@ -83,3 +83,7 @@ Three pre-generated binary fixtures are included in the project root:
 
 - **Field**: KoalaBear (31-bit prime) — the only supported field
 - **PCS**: Basefold — the only supported polynomial commitment scheme
+
+## License
+
+This project is licensed under the [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
