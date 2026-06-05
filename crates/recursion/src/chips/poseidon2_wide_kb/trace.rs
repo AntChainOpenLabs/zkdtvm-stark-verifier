@@ -1,11 +1,9 @@
 use super::{columns::preprocessed::Poseidon2PreprocessedColsWideKb, Poseidon2WideKbChip};
 use crate::{
-    instruction::Instruction::Poseidon2, ExecutionRecord, Poseidon2Io, Poseidon2SkinnyInstr,
+    instruction::Instruction::Poseidon2, ExecutionRecord, Poseidon2Io, Poseidon2WideInstr,
 };
-use crate::{
-    operations::poseidon2::WIDTH,
-    utils::{next_power_of_two, padded_rows_threshold},
-};
+use crate::operations::poseidon2::WIDTH;
+use crate::utils::{next_power_of_two, padded_rows_threshold};
 use dt_stark::{
     air::MachineAir,
     sumcheck::trace::{CompressedMatrix, PaddingRow},
@@ -63,19 +61,14 @@ impl<F: Field, const DEGREE: usize> MachineAir<F> for Poseidon2WideKbChip<DEGREE
         let real_nb_rows = events.len();
         let mut values = vec![BabyBear::zero(); real_nb_rows * num_columns];
 
-        let populate_perm_ffi = |input: &[BabyBear; WIDTH], input_row: &mut [BabyBear]| unsafe {
+        let populate_perm_ffi = |_input: &[BabyBear; WIDTH], _input_row: &mut [BabyBear]| {
             #[cfg(feature = "sys")]
-            {
-            crate::sys::poseidon2_wide_event_to_row_koalabear(
-                input.as_ptr(),
-                input_row.as_mut_ptr(),
-                false,
-            )
-;
-            }
-            #[cfg(not(feature = "sys"))]
-            {
-                unimplemented!("sys feature required for trace generation")
+            unsafe {
+                crate::sys::poseidon2_wide_event_to_row_koalabear(
+                    _input.as_ptr(),
+                    _input_row.as_mut_ptr(),
+                    false,
+                )
             }
         };
 
@@ -124,15 +117,15 @@ impl<F: Field, const DEGREE: usize> MachineAir<F> for Poseidon2WideKbChip<DEGREE
             "generate_preprocessed_trace only supports 32-bit prime fields (BabyBear/KoalaBear)"
         );
 
-        let instrs: Vec<&Poseidon2SkinnyInstr<BabyBear>> =
+        let instrs: Vec<&Poseidon2WideInstr<BabyBear>> =
             program
                 .inner
                 .iter()
                 .filter_map(|instruction| match instruction {
                     Poseidon2(instr) => Some(unsafe {
                         std::mem::transmute::<
-                            &Poseidon2SkinnyInstr<F>,
-                            &Poseidon2SkinnyInstr<BabyBear>,
+                            &Poseidon2WideInstr<F>,
+                            &Poseidon2WideInstr<BabyBear>,
                         >(instr.as_ref())
                     }),
                     _ => None,
@@ -145,26 +138,15 @@ impl<F: Field, const DEGREE: usize> MachineAir<F> for Poseidon2WideKbChip<DEGREE
         values.par_chunks_mut(PREPROCESSED_POSEIDON2_WIDTH).zip_eq(instrs).for_each(
             |(row, instr)| {
                 let cols: &mut Poseidon2PreprocessedColsWideKb<_> = row.borrow_mut();
+                #[cfg(feature = "sys")]
                 unsafe {
-                    #[cfg(feature = "sys")]
-                    {
-                        #[cfg(feature = "sys")]
-                        {
-                        crate::sys::poseidon2_wide_instr_to_row_koalabear(
+                    crate::sys::poseidon2_wide_instr_to_row_koalabear(
                         instr,
                         cols as *mut Poseidon2PreprocessedColsWideKb<_> as *mut u8,
                     );
-                        }
-                        #[cfg(not(feature = "sys"))]
-                        {
-                            unimplemented!("sys feature required for trace generation")
-                        }
-                    }
-                    #[cfg(not(feature = "sys"))]
-                    {
-                        // sys call omitted in verifier build
-                    }
                 }
+                #[cfg(not(feature = "sys"))]
+                let _ = (instr, cols);
             },
         );
 

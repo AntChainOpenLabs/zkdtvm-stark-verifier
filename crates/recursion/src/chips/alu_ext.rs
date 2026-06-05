@@ -12,16 +12,32 @@ use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip};
 
 pub const NUM_EXT_ALU_ENTRIES_PER_ROW: usize = 4;
+pub const NUM_EXT_ALU_SHRINK_ENTRIES_PER_ROW: usize = 3;
 
-#[derive(Default)]
-pub struct ExtAluChip;
+pub struct ExtAluChip<const N: usize = NUM_EXT_ALU_ENTRIES_PER_ROW>;
 
-pub const NUM_EXT_ALU_COLS: usize = core::mem::size_of::<ExtAluCols<u8>>();
+impl<const N: usize> Default for ExtAluChip<N> {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl<const N: usize> ExtAluChip<N> {
+    pub const fn num_cols() -> usize {
+        core::mem::size_of::<ExtAluValueCols<u8>>() * N
+    }
+
+    pub const fn num_preprocessed_cols() -> usize {
+        core::mem::size_of::<ExtAluAccessCols<u8>>() * N
+    }
+}
+
+pub const NUM_EXT_ALU_COLS: usize = ExtAluChip::<NUM_EXT_ALU_ENTRIES_PER_ROW>::num_cols();
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct ExtAluCols<F: Copy> {
-    pub values: [ExtAluValueCols<F>; NUM_EXT_ALU_ENTRIES_PER_ROW],
+pub struct ExtAluCols<F: Copy, const N: usize = NUM_EXT_ALU_ENTRIES_PER_ROW> {
+    pub values: [ExtAluValueCols<F>; N],
 }
 const NUM_EXT_ALU_VALUE_COLS: usize = core::mem::size_of::<ExtAluValueCols<u8>>();
 
@@ -31,12 +47,13 @@ pub struct ExtAluValueCols<F: Copy> {
     pub vals: ExtAluIo<Block<F>>,
 }
 
-pub const NUM_EXT_ALU_PREPROCESSED_COLS: usize = core::mem::size_of::<ExtAluPreprocessedCols<u8>>();
+pub const NUM_EXT_ALU_PREPROCESSED_COLS: usize =
+    ExtAluChip::<NUM_EXT_ALU_ENTRIES_PER_ROW>::num_preprocessed_cols();
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct ExtAluPreprocessedCols<F: Copy> {
-    pub accesses: [ExtAluAccessCols<F>; NUM_EXT_ALU_ENTRIES_PER_ROW],
+pub struct ExtAluPreprocessedCols<F: Copy, const N: usize = NUM_EXT_ALU_ENTRIES_PER_ROW> {
+    pub accesses: [ExtAluAccessCols<F>; N],
 }
 
 pub const NUM_EXT_ALU_ACCESS_COLS: usize = core::mem::size_of::<ExtAluAccessCols<u8>>();
@@ -52,27 +69,31 @@ pub struct ExtAluAccessCols<F: Copy> {
     pub mult: F,
 }
 
-impl<F: Field> BaseAir<F> for ExtAluChip {
+impl<F: Field, const N: usize> BaseAir<F> for ExtAluChip<N> {
     fn width(&self) -> usize {
-        NUM_EXT_ALU_COLS
+        Self::num_cols()
     }
 }
 
-impl<F: Field> MachineAir<F> for ExtAluChip {
+impl<F: Field, const N: usize> MachineAir<F> for ExtAluChip<N> {
     type Record = ExecutionRecord<F>;
 
     type Program = crate::RecursionProgram<F>;
 
     fn name(&self) -> String {
-        "ExtAlu".to_string()
+        if N == NUM_EXT_ALU_ENTRIES_PER_ROW {
+            "ExtAlu".to_string()
+        } else {
+            format!("ExtAlu<{}>", N)
+        }
     }
 
     fn preprocessed_width(&self) -> usize {
-        NUM_EXT_ALU_PREPROCESSED_COLS
+        Self::num_preprocessed_cols()
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
-        let nb_rows = instrs_len.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
+        let nb_rows = instrs_len.div_ceil(N);
         let fixed_log2_rows = program.fixed_log2_rows(self);
         let nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
@@ -99,9 +120,10 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
                     .collect::<Vec<_>>(),
             )
         };
+        let num_preprocessed_cols = Self::num_preprocessed_cols();
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
-        let real_nb_rows = instrs.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let mut values = vec![BabyBear::zero(); real_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
+        let real_nb_rows = instrs.len().div_ceil(N);
+        let mut values = vec![BabyBear::zero(); real_nb_rows * num_preprocessed_cols];
 
         let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
@@ -121,11 +143,11 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
 
         let main = RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<BabyBear>, Vec<F>>(values) },
-            NUM_EXT_ALU_PREPROCESSED_COLS,
+            num_preprocessed_cols,
         );
         Some(CompressedMatrix::new(
             main,
-            PaddingRow::Zero { width: NUM_EXT_ALU_PREPROCESSED_COLS },
+            PaddingRow::Zero { width: num_preprocessed_cols },
             padded_nb_rows,
         ))
     }
@@ -136,7 +158,7 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.ext_alu_events;
-        let nb_rows = events.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
+        let nb_rows = events.len().div_ceil(N);
         let fixed_log2_rows = input.fixed_log2_rows(self);
         let nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
@@ -156,9 +178,10 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
                 &input.ext_alu_events,
             )
         };
+        let num_cols = Self::num_cols();
         let padded_nb_rows = self.num_rows(input).unwrap();
-        let real_nb_rows = events.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let mut values = vec![BabyBear::zero(); real_nb_rows * NUM_EXT_ALU_COLS];
+        let real_nb_rows = events.len().div_ceil(N);
+        let mut values = vec![BabyBear::zero(); real_nb_rows * num_cols];
 
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
@@ -178,9 +201,9 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
 
         let main = RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<BabyBear>, Vec<F>>(values) },
-            NUM_EXT_ALU_COLS,
+            num_cols,
         );
-        CompressedMatrix::new(main, PaddingRow::Zero { width: NUM_EXT_ALU_COLS }, padded_nb_rows)
+        CompressedMatrix::new(main, PaddingRow::Zero { width: num_cols }, padded_nb_rows)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -192,17 +215,17 @@ impl<F: Field> MachineAir<F> for ExtAluChip {
     }
 }
 
-impl<AB> Air<AB> for ExtAluChip
+impl<AB, const N: usize> Air<AB> for ExtAluChip<N>
 where
     AB: DTRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        let local: &ExtAluCols<AB::Var> = (*local).borrow();
+        let local: &ExtAluCols<AB::Var, N> = (*local).borrow();
         let prep = builder.preprocessed();
         let prep_local = prep.row_slice(0);
-        let prep_local: &ExtAluPreprocessedCols<AB::Var> = (*prep_local).borrow();
+        let prep_local: &ExtAluPreprocessedCols<AB::Var, N> = (*prep_local).borrow();
 
         for (
             ExtAluValueCols { vals },
@@ -230,5 +253,150 @@ where
             // Write the output to memory.
             builder.send_block(addrs.out, vals.out, mult);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{chips::test_fixtures, runtime::instruction as instr};
+    use dt_stark::StarkGenericConfig;
+    use machine::tests::test_recursion_linear_program;
+    use p3_baby_bear::BabyBear;
+    use p3_field::{extension::BinomialExtensionField, AbstractExtensionField, AbstractField};
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use stark::BabyBearPoseidon2Outer;
+
+    use super::*;
+
+    fn generate_trace_reference(
+        input: &ExecutionRecord<BabyBear>,
+        _: &mut ExecutionRecord<BabyBear>,
+    ) -> RowMajorMatrix<BabyBear> {
+        let events = &input.ext_alu_events;
+        let padded_nb_rows = ExtAluChip.num_rows(input).unwrap();
+        let mut values = vec![BabyBear::zero(); padded_nb_rows * NUM_EXT_ALU_COLS];
+
+        let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut ExtAluValueCols<_> = row.borrow_mut();
+                *cols = ExtAluValueCols { vals };
+            },
+        );
+
+        RowMajorMatrix::new(values, NUM_EXT_ALU_COLS)
+    }
+
+    #[test]
+    fn generate_trace() {
+        let shard = test_fixtures::shard();
+        let mut execution_record = test_fixtures::default_execution_record();
+        let trace = ExtAluChip.generate_trace(&shard, &mut execution_record);
+        let ref_full = generate_trace_reference(&shard, &mut execution_record);
+        assert!(trace.total_height >= test_fixtures::MIN_TEST_CASES);
+        assert_eq!(trace.total_height, ref_full.height());
+        for i in 0..trace.main.height() {
+            assert_eq!(trace.main.row(i), ref_full.row(i));
+        }
+        for i in trace.main.height()..trace.total_height {
+            assert!(ref_full.row(i).iter().all(|&x| x == BabyBear::zero()));
+        }
+    }
+
+    fn generate_preprocessed_trace_reference(
+        program: &RecursionProgram<BabyBear>,
+    ) -> RowMajorMatrix<BabyBear> {
+        type F = BabyBear;
+
+        let instrs = program
+            .inner
+            .iter()
+            .filter_map(|instruction| match instruction {
+                Instruction::ExtAlu(x) => Some(x),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let padded_nb_rows = ExtAluChip.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![F::zero(); padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
+
+        let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let ExtAluInstr { opcode, mult, addrs } = instr;
+                let access: &mut ExtAluAccessCols<_> = row.borrow_mut();
+                *access = ExtAluAccessCols {
+                    addrs: addrs.to_owned(),
+                    is_add: F::from_bool(false),
+                    is_sub: F::from_bool(false),
+                    is_mul: F::from_bool(false),
+                    is_div: F::from_bool(false),
+                    mult: mult.to_owned(),
+                };
+                let target_flag = match opcode {
+                    ExtAluOpcode::AddE => &mut access.is_add,
+                    ExtAluOpcode::SubE => &mut access.is_sub,
+                    ExtAluOpcode::MulE => &mut access.is_mul,
+                    ExtAluOpcode::DivE => &mut access.is_div,
+                };
+                *target_flag = F::from_bool(true);
+            },
+        );
+
+        RowMajorMatrix::new(values, NUM_EXT_ALU_PREPROCESSED_COLS)
+    }
+
+    #[test]
+    #[ignore = "Failing due to merge conflicts. Will be fixed shortly."]
+    fn generate_preprocessed_trace() {
+        let program = test_fixtures::program();
+        let trace = ExtAluChip.generate_preprocessed_trace(&program).unwrap();
+        let ref_full = generate_preprocessed_trace_reference(&program);
+        assert!(trace.total_height >= test_fixtures::MIN_TEST_CASES);
+        assert_eq!(trace.total_height, ref_full.height());
+        for i in 0..trace.main.height() {
+            assert_eq!(trace.main.row(i), ref_full.row(i));
+        }
+        for i in trace.main.height()..trace.total_height {
+            assert!(ref_full.row(i).iter().all(|&x| x == BabyBear::zero()));
+        }
+    }
+
+    #[test]
+    pub fn four_ops() {
+        type SC = BabyBearPoseidon2Outer;
+        type F = <SC as StarkGenericConfig>::Val;
+
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut random_extfelt = move || {
+            let inner: [F; 4] = core::array::from_fn(|_| rng.sample(rand::distributions::Standard));
+            BinomialExtensionField::<F, D>::from_base_slice(&inner)
+        };
+        let mut addr = 0;
+
+        let instructions = (0..1000)
+            .flat_map(|_| {
+                let quot = random_extfelt();
+                let in2 = random_extfelt();
+                let in1 = in2 * quot;
+                let alloc_size = 6;
+                let a = (0..alloc_size).map(|x| x + addr).collect::<Vec<_>>();
+                addr += alloc_size;
+                [
+                    instr::mem_ext(MemAccessKind::Write, 4, a[0], in1),
+                    instr::mem_ext(MemAccessKind::Write, 4, a[1], in2),
+                    instr::ext_alu(ExtAluOpcode::AddE, 1, a[2], a[0], a[1]),
+                    instr::mem_ext(MemAccessKind::Read, 1, a[2], in1 + in2),
+                    instr::ext_alu(ExtAluOpcode::SubE, 1, a[3], a[0], a[1]),
+                    instr::mem_ext(MemAccessKind::Read, 1, a[3], in1 - in2),
+                    instr::ext_alu(ExtAluOpcode::MulE, 1, a[4], a[0], a[1]),
+                    instr::mem_ext(MemAccessKind::Read, 1, a[4], in1 * in2),
+                    instr::ext_alu(ExtAluOpcode::DivE, 1, a[5], a[0], a[1]),
+                    instr::mem_ext(MemAccessKind::Read, 1, a[5], quot),
+                ]
+            })
+            .collect::<Vec<Instruction<F>>>();
+
+        test_recursion_linear_program(instructions);
     }
 }

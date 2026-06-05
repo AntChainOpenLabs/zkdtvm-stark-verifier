@@ -15,10 +15,17 @@ use p3_koala_bear::{DiffusionMatrixKoalaBear, KoalaBear};
 use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
-use basefold::basefold::basefold_pcs::BasefoldProof;
+use basefold::basefold::basefold_pcs::{BasefoldInputProof, BasefoldProof};
 use serde::{Deserialize, Serialize};
 
 pub const DIGEST_SIZE: usize = 8;
+
+fn log_final_poly_len_from_env(default: usize) -> usize {
+    std::env::var("BASEFOLD_LOG_FINAL_POLY_LEN")
+        .ok()
+        .map(|value| value.parse().expect("BASEFOLD_LOG_FINAL_POLY_LEN must be a usize"))
+        .unwrap_or(default)
+}
 
 /// A configuration for inner recursion.
 pub type InnerVal = KoalaBear;
@@ -46,8 +53,12 @@ pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 pub type InnerPcsProof =
     TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
-pub type InnerBasefoldProof =
-    BasefoldProof<InnerChallenge, InnerChallengeMmcs, InnerVal, Vec<Vec<InnerBatchOpening>>>;
+pub type InnerBasefoldProof = BasefoldProof<
+    InnerChallenge,
+    InnerChallengeMmcs,
+    InnerVal,
+    BasefoldInputProof<InnerVal, InnerValMmcs>,
+>;
 
 /// The permutation for inner recursion.
 #[must_use]
@@ -84,6 +95,7 @@ pub fn dt_fri_config() -> FriConfig<InnerChallengeMmcs> {
         num_queries,
         grinding_bits_query: 20,
         grinding_bits_batching: 10,
+        log_final_poly_len: log_final_poly_len_from_env(4),
         mmcs: challenge_mmcs,
     }
 }
@@ -104,6 +116,7 @@ pub fn inner_fri_config() -> FriConfig<InnerChallengeMmcs> {
         num_queries,
         grinding_bits_query: 20,
         grinding_bits_batching: 10,
+        log_final_poly_len: log_final_poly_len_from_env(4),
         mmcs: challenge_mmcs,
     }
 }
@@ -194,12 +207,13 @@ pub mod koala_bear_poseidon2 {
     use p3_merkle_tree::FieldMerkleTreeMmcs;
     use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
     use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
-    use basefold::basefold::basefold_pcs::BaseFoldPcs;
-    use basefold::basefold::mlpcs::MlPCS;
+    use basefold::basefold::{basefold_pcs::BaseFoldPcs, mlpcs::MlPCS};
     use serde::{Deserialize, Serialize};
 
-    use crate::config::{Com, StarkGenericConfig, ZeroCommitment};
-    use crate::DIGEST_SIZE;
+    use crate::{
+        config::{Com, StarkGenericConfig, ZeroCommitment},
+        DIGEST_SIZE,
+    };
     pub type Val = KoalaBear;
     pub type Challenge = BinomialExtensionField<Val, 4>;
 
@@ -253,6 +267,7 @@ pub mod koala_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 20,
             grinding_bits_batching: 10,
+            log_final_poly_len: super::log_final_poly_len_from_env(4),
             mmcs: challenge_mmcs,
         }
     }
@@ -272,6 +287,47 @@ pub mod koala_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 20,
             grinding_bits_batching: 10,
+            log_final_poly_len: super::log_final_poly_len_from_env(4),
+            mmcs: challenge_mmcs,
+        }
+    }
+
+    #[must_use]
+    pub fn shrink_fri_config() -> FriConfig<ChallengeMmcs> {
+        let perm = my_perm();
+        let hash = MyHash::new(perm.clone());
+        let compress = MyCompress::new(perm.clone());
+        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress));
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(value) => value.parse().unwrap(),
+            Err(_) => 97,
+        };
+        FriConfig {
+            log_blowup: 3,
+            num_queries,
+            grinding_bits_query: 20,
+            grinding_bits_batching: 10,
+            log_final_poly_len: super::log_final_poly_len_from_env(4),
+            mmcs: challenge_mmcs,
+        }
+    }
+
+    #[must_use]
+    pub fn root_shrink_fri_config() -> FriConfig<ChallengeMmcs> {
+        let perm = my_perm();
+        let hash = MyHash::new(perm.clone());
+        let compress = MyCompress::new(perm.clone());
+        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress));
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(value) => value.parse().unwrap(),
+            Err(_) => 97,
+        };
+        FriConfig {
+            log_blowup: 3,
+            num_queries,
+            grinding_bits_query: 20,
+            grinding_bits_batching: 10,
+            log_final_poly_len: super::log_final_poly_len_from_env(4),
             mmcs: challenge_mmcs,
         }
     }
@@ -291,6 +347,7 @@ pub mod koala_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 20,
             grinding_bits_batching: 10,
+            log_final_poly_len: super::log_final_poly_len_from_env(4),
             mmcs: challenge_mmcs,
         }
     }
@@ -298,6 +355,8 @@ pub mod koala_bear_poseidon2 {
     enum KoalaBearPoseidon2Type {
         Default,
         Compressed,
+        Shrink,
+        RootShrink,
     }
 
     #[derive(Deserialize)]
@@ -341,6 +400,44 @@ pub mod koala_bear_poseidon2 {
         }
 
         #[must_use]
+        pub fn shrink() -> Self {
+            let perm = my_perm();
+            let hash = MyHash::new(perm.clone());
+            let compress = MyCompress::new(perm.clone());
+            let val_mmcs = ValMmcs::new(hash, compress);
+            let dft = Dft {};
+            let fri_config = shrink_fri_config();
+            let fri_config1 = shrink_fri_config();
+
+            let pcs = Pcs::new(27, dft, val_mmcs.clone(), fri_config);
+            let mlpcs = Mlpcs::new(val_mmcs, fri_config1);
+            Self { pcs, mlpcs, perm, config_type: KoalaBearPoseidon2Type::Shrink }
+        }
+
+        #[must_use]
+        pub fn root_shrink() -> Self {
+            let perm = my_perm();
+            let hash = MyHash::new(perm.clone());
+            let compress = MyCompress::new(perm.clone());
+            let val_mmcs = ValMmcs::new(hash, compress);
+            let dft = Dft {};
+            let fri_config = root_shrink_fri_config();
+            let fri_config1 = root_shrink_fri_config();
+
+            let pcs = Pcs::new(27, dft, val_mmcs.clone(), fri_config);
+            // Enable path-pruning on the root_shrink PCS. This produces
+            // BFS-merged Merkle proofs that significantly reduce proof size
+            // in the final compress layers (penultimate + root). Earlier layers
+            // keep use_path_pruning=false so their programs remain cacheable.
+            let enable_pruning = std::env::var("DT_USE_PATH_PRUNING")
+                .map(|v| v == "1")
+                .unwrap_or(true); // default ON for root_shrink
+            let mut mlpcs = Mlpcs::new(val_mmcs, fri_config1);
+            mlpcs.use_path_pruning = enable_pruning;
+            Self { pcs, mlpcs, perm, config_type: KoalaBearPoseidon2Type::RootShrink }
+        }
+
+        #[must_use]
         pub fn ultra_compressed() -> Self {
             let perm = my_perm();
             let hash = MyHash::new(perm.clone());
@@ -361,6 +458,8 @@ pub mod koala_bear_poseidon2 {
             match self.config_type {
                 KoalaBearPoseidon2Type::Default => Self::new(),
                 KoalaBearPoseidon2Type::Compressed => Self::compressed(),
+                KoalaBearPoseidon2Type::Shrink => Self::shrink(),
+                KoalaBearPoseidon2Type::RootShrink => Self::root_shrink(),
             }
         }
     }

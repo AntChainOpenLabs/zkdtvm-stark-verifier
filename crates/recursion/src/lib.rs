@@ -118,12 +118,46 @@ pub struct Poseidon2Io<V> {
     pub output: [V; WIDTH],
 }
 
-/// An instruction invoking the Poseidon2 permutation.
+/// An instruction invoking the Poseidon2 permutation, used by the wide-layout chip
+/// (`Poseidon2WideChip` / `Poseidon2WideKbChip`). This layout fits one full permutation per row,
+/// so no per-round scratch addresses are needed.
+///
+/// Kept `#[repr(C)]` and `Copy` so it can cross the C++ FFI boundary unchanged.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[repr(C)]
+pub struct Poseidon2WideInstr<F> {
+    pub addrs: Poseidon2Io<Address<F>>,
+    pub mults: [F; WIDTH],
+}
+
+/// Number of `WIDTH`-tuples of scratch addresses needed to chain intermediate states between
+/// consecutive *rows* of the skinny chip's per-permutation block. Equals `ROWS_PER_PERMUTE - 1`.
+///
+/// The two skinny chips lay out a permutation differently:
+///   * BabyBear  : one round per row, 21 rows per permutation -> `SKINNY_NUM_SCRATCH = 20`.
+///   * KoalaBear : 5-row layout (2 ext + 1 internal-rounds row + 2 ext) -> `SKINNY_NUM_SCRATCH = 4`.
+///
+/// cbindgen:ignore
+#[cfg(feature = "babybear")]
+pub const SKINNY_NUM_SCRATCH: usize = 20;
+/// cbindgen:ignore
+#[cfg(feature = "koalabear")]
+pub const SKINNY_NUM_SCRATCH: usize = 4;
+
+/// An instruction invoking the Poseidon2 permutation, specialised for the skinny chip variants
+/// (BabyBear `Poseidon2SkinnyChip` and KoalaBear `Poseidon2SkinnyKbChip`).
+///
+/// Carries the `scratch_addrs` needed to chain intermediate states across the chip's per-row
+/// transitions via memory lookup, since transition constraints are evaluated on a single row
+/// only. `scratch_addrs[r][i]` holds the i-th component of the state output of row `r`, which
+/// equals the state input of row `r + 1`. The array length is fixed to `SKINNY_NUM_SCRATCH`
+/// (= `ROWS_PER_PERMUTE - 1`), differing between BabyBear (one-round-per-row, 20 groups) and
+/// KoalaBear (5-row layout, 8 groups) via cargo feature gating.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Poseidon2SkinnyInstr<F> {
     pub addrs: Poseidon2Io<Address<F>>,
     pub mults: [F; WIDTH],
+    pub scratch_addrs: [[Address<F>; WIDTH]; SKINNY_NUM_SCRATCH],
 }
 
 pub type Poseidon2Event<F> = Poseidon2Io<F>;
@@ -152,7 +186,7 @@ pub struct SelectInstr<F> {
 pub type SelectEvent<F> = SelectIo<F>;
 
 pub type Poseidon2WideEvent<F> = Poseidon2Io<F>;
-pub type Poseidon2Instr<F> = Poseidon2SkinnyInstr<F>;
+pub type Poseidon2Instr<F> = Poseidon2WideInstr<F>;
 
 /// An instruction that will save the public values to the execution record and will commit to
 /// it's digest.
@@ -316,7 +350,10 @@ pub struct ExtExpReverseBitsIo<V> {
     pub base: V,
     // The bits of the exponent in little-endian order in a vec.
     pub exp: Vec<V>,
-    pub result: V,
+    /// Previous accumulator values for each row (len = N).
+    pub prev_acc_vec: Vec<V>,
+    /// Current accumulator values for each row (len = N).
+    pub acc_vec: Vec<V>,
 }
 
 /// An instruction invoking the exp-reverse-bits operation.
@@ -324,8 +361,6 @@ pub struct ExtExpReverseBitsIo<V> {
 pub struct ExtExpReverseBitsInstr<F> {
     pub addrs: ExtExpReverseBitsIo<Address<F>>,
     pub mult: F,
-    /// Chain addresses for linking accum_squared across rows (len = num_bits - 1).
-    pub chain_accum_addrs: Vec<Address<F>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -334,7 +369,8 @@ pub struct ExtExpReverseBitsInstrFFI<'a, F> {
     pub base: &'a Address<F>,
     pub exp_ptr: *const Address<F>,
     pub exp_len: usize,
-    pub result: &'a Address<F>,
+    pub prev_acc_ptr: *const Address<F>,
+    pub acc_ptr: *const Address<F>,
 
     pub mult: &'a F,
 }
@@ -345,7 +381,8 @@ impl<'a, F> From<&'a ExtExpReverseBitsInstr<F>> for ExtExpReverseBitsInstrFFI<'a
             base: &instr.addrs.base,
             exp_ptr: instr.addrs.exp.as_ptr(),
             exp_len: instr.addrs.exp.len(),
-            result: &instr.addrs.result,
+            prev_acc_ptr: instr.addrs.prev_acc_vec.as_ptr(),
+            acc_ptr: instr.addrs.acc_vec.as_ptr(),
 
             mult: &instr.mult,
         }
@@ -358,7 +395,10 @@ impl<'a, F> From<&'a ExtExpReverseBitsInstr<F>> for ExtExpReverseBitsInstrFFI<'a
 pub struct ExtExpReverseBitsEvent<F> {
     pub base: Block<F>,
     pub exp: Vec<F>,
-    pub result: Block<F>,
+    /// Previous accumulator values for each row (len = N).
+    pub prev_acc_vec: Vec<Block<F>>,
+    /// Current accumulator values for each row (len = N).
+    pub acc_vec: Vec<Block<F>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -367,7 +407,8 @@ pub struct ExtExpReverseBitsEventFFI<'a, F> {
     pub base: &'a Block<F>,
     pub exp_ptr: *const F,
     pub exp_len: usize,
-    pub result: &'a Block<F>,
+    pub prev_acc_ptr: *const Block<F>,
+    pub acc_ptr: *const Block<F>,
 }
 
 impl<'a, F> From<&'a ExtExpReverseBitsEvent<F>> for ExtExpReverseBitsEventFFI<'a, F> {
@@ -376,7 +417,8 @@ impl<'a, F> From<&'a ExtExpReverseBitsEvent<F>> for ExtExpReverseBitsEventFFI<'a
             base: &event.base,
             exp_ptr: event.exp.as_ptr(),
             exp_len: event.exp.len(),
-            result: &event.result,
+            prev_acc_ptr: event.prev_acc_vec.as_ptr(),
+            acc_ptr: event.acc_vec.as_ptr(),
         }
     }
 }
@@ -384,41 +426,19 @@ impl<'a, F> From<&'a ExtExpReverseBitsEvent<F>> for ExtExpReverseBitsEventFFI<'a
 // -------------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SumcheckRoundIo<V> {
-    pub coeffs: Vec<V>,
-    pub challenge: V,
-    pub claim: V,
-    pub new_claim: V,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SumcheckRoundInstr<F> {
-    pub addrs: SumcheckRoundIo<Address<F>>,
-    pub mult: F,
-    /// Chain addresses for linking running_sum across rows (len = num_coeffs - 1).
-    pub chain_rs_addrs: Vec<Address<F>>,
-    /// Chain addresses for linking horner accumulator across rows (len = num_coeffs - 1).
-    pub chain_ha_addrs: Vec<Address<F>>,
-}
-
-pub type SumcheckRoundEvent<F> = SumcheckRoundIo<Block<F>>;
-
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrefixSumChecksIo<V> {
     pub x1_vec: Vec<V>,
     pub x2_vec: Vec<V>,
-    pub init_acc: V,
-    pub result: V,
+    /// Previous accumulator values for each row (len = N).
+    pub prev_acc_vec: Vec<V>,
+    /// Current accumulator values for each row (len = N).
+    pub acc_vec: Vec<V>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrefixSumChecksInstr<F> {
     pub addrs: PrefixSumChecksIo<Address<F>>,
     pub mult: F,
-    /// Chain addresses for linking accumulator across rows (len = num_steps - 1).
-    pub chain_acc_addrs: Vec<Address<F>>,
 }
 
 pub type PrefixSumChecksEvent<F> = PrefixSumChecksIo<Block<F>>;

@@ -7,8 +7,10 @@ use serde::Serialize;
 
 /// Multilinear Polynomial Commitment Scheme (PCS) trait.
 ///
-/// In zkdtvm-stark-verifier only `verify` is implemented. The `commit` and `open` signatures
-/// are retained for type-system compatibility but must not be called at runtime.
+/// Provides `commit`, `open`, and `verify` for batches of multilinear polynomials
+/// represented as compressed matrices (one column per polynomial).
+/// `CompressedMatrix` stores only non-padding rows, with padding rows efficiently
+/// represented by a `PaddingRow` descriptor.
 pub trait MlPCS {
     type Field: TwoAdicField;
     type ExtensionField: TwoAdicField + ExtensionField<Self::Field>;
@@ -16,16 +18,18 @@ pub trait MlPCS {
     type Commitment: Clone + Serialize + DeserializeOwned + Send + Sync;
     type Challenger;
     type BatchProof: Clone + Serialize + DeserializeOwned;
+
     type Error: Debug;
 
-    /// Stub — not available in the verifier-only build.
+    /// Commit to a batch of matrices. Each column of each matrix is treated as a
+    /// multilinear polynomial over the hypercube.
     #[allow(clippy::type_complexity)]
     fn commit(
         &self,
         evaluations: Vec<&CompressedMatrix<Self::Field>>,
     ) -> (Self::Commitment, Self::ProverData);
 
-    /// Stub — not available in the verifier-only build.
+    /// Open multiple batches of polynomials at a single opening point, without rotation support.
     fn open(
         &self,
         polynomials_batch: Vec<Vec<CompressedMatrix<Self::Field>>>,
@@ -35,7 +39,7 @@ pub trait MlPCS {
         challenger: &mut Self::Challenger,
     ) -> Result<Self::BatchProof, Self::Error>;
 
-    /// Verify multiple batches of polynomial openings at a single opening point.
+    /// Verify multiple batches of polynomial openings at a single opening point, without rotation support.
     fn verify(
         &self,
         commitments: Vec<Self::Commitment>,

@@ -13,7 +13,7 @@ use p3_fri::{
 use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
-use basefold::basefold::basefold_pcs::BasefoldProof;
+use basefold::basefold::basefold_pcs::{BasefoldInputProof, BasefoldProof};
 use serde::{Deserialize, Serialize};
 
 pub const DIGEST_SIZE: usize = 8;
@@ -44,8 +44,12 @@ pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 pub type InnerPcsProof =
     TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
-pub type InnerBasefoldProof =
-    BasefoldProof<InnerChallenge, InnerChallengeMmcs, InnerVal, Vec<Vec<InnerBatchOpening>>>;
+pub type InnerBasefoldProof = BasefoldProof<
+    InnerChallenge,
+    InnerChallengeMmcs,
+    InnerVal,
+    BasefoldInputProof<InnerVal, InnerValMmcs>,
+>;
 
 /// The permutation for inner recursion.
 #[must_use]
@@ -69,6 +73,7 @@ pub fn dt_fri_config() -> FriConfig<InnerChallengeMmcs> {
         num_queries,
         grinding_bits_query: 24,
         grinding_bits_batching: 10,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -89,6 +94,7 @@ pub fn inner_fri_config() -> FriConfig<InnerChallengeMmcs> {
         num_queries,
         grinding_bits_query: 24,
         grinding_bits_batching: 10,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -177,12 +183,13 @@ pub mod baby_bear_poseidon2 {
     use p3_merkle_tree::FieldMerkleTreeMmcs;
     use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
     use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
-    use basefold::basefold::basefold_pcs::BaseFoldPcs;
-    use basefold::basefold::mlpcs::MlPCS;
+    use basefold::basefold::{basefold_pcs::BaseFoldPcs, mlpcs::MlPCS};
     use serde::{Deserialize, Serialize};
 
-    use crate::config::{Com, StarkGenericConfig, ZeroCommitment};
-    use crate::DIGEST_SIZE;
+    use crate::{
+        config::{Com, StarkGenericConfig, ZeroCommitment},
+        DIGEST_SIZE,
+    };
     pub type Val = BabyBear;
     pub type Challenge = BinomialExtensionField<Val, 4>;
 
@@ -240,6 +247,7 @@ pub mod baby_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 24,
             grinding_bits_batching: 10,
+            log_final_poly_len: 5,
             mmcs: challenge_mmcs,
         }
     }
@@ -259,6 +267,7 @@ pub mod baby_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 24,
             grinding_bits_batching: 10,
+            log_final_poly_len: 5,
             mmcs: challenge_mmcs,
         }
     }
@@ -278,6 +287,7 @@ pub mod baby_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 20,
             grinding_bits_batching: 6,
+            log_final_poly_len: 5,
             mmcs: challenge_mmcs,
         }
     }

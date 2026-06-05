@@ -19,13 +19,12 @@ pub const NUM_INTERNAL_ROUNDS: usize = 13;
 /// cbindgen:ignore
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
-/// A chip that implements the Poseidon2 permutation in the skinny variant (one external round per
-/// row and one row for all internal rounds).
+/// BabyBear variant of the Poseidon2 skinny chip. Uses SBOX_DEGREE=7 (x^7).
+/// One round per row; cross-round chaining via memory lookups (single-row constraints only).
 pub struct Poseidon2SkinnyChip<const DEGREE: usize>(PhantomData<()>);
 
 impl<const DEGREE: usize> Default for Poseidon2SkinnyChip<DEGREE> {
     fn default() -> Self {
-        // We only support machines with degree 9.
         assert!(DEGREE >= 9);
         Self(PhantomData)
     }
@@ -70,3 +69,4 @@ pub(crate) fn internal_linear_layer<F: AbstractField>(state: &mut [F; WIDTH]) {
     let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
 }
+

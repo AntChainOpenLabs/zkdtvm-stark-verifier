@@ -252,3 +252,74 @@ where
         self.poly_eval::<AB>(builder, local, prep_local);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::print_stdout)]
+
+    use super::*;
+    use crate::Instruction::PolyEval;
+    use crate::{
+        chips::test_fixtures,
+        linear_program,
+        machine::tests::test_recursion_linear_program,
+        runtime::{instruction as instr, ExecutionRecord},
+        stark::BabyBearPoseidon2Outer,
+        Address, Instruction, MemAccessKind, PolyEvalIo, RecursionProgram,
+    };
+    use crate::utils::setup_logger;
+    use dt_stark::{air::MachineAir, StarkGenericConfig};
+    use itertools::Itertools;
+    use p3_baby_bear::BabyBear;
+    use p3_field::{AbstractExtensionField, AbstractField};
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::iter::once;
+
+    const DEGREE: usize = 3;
+
+    #[test]
+    fn prove_babybear_circuit_erbl() {
+        setup_logger();
+        type SC = BabyBearPoseidon2Outer;
+        type F = <SC as StarkGenericConfig>::Val;
+
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 4)) };
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut random_coeff = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 4)) };
+        let mut addr = 0;
+
+        let instructions = (1..15)
+            .flat_map(|i| {
+                let point = random_felt();
+                let coeff = vec![random_coeff(); i];
+                let out = coeff[1..].iter().fold(coeff[0], |acc, &x| acc * point + x);
+
+                let alloc_size = i + 2;
+                let coeff_a = (0..i).map(|x| x + addr + 1).collect::<Vec<_>>();
+                let coeff_a_clone = coeff_a.clone();
+                let point_a = addr;
+                let out_a = addr + alloc_size - 1;
+                addr += alloc_size;
+                let poly_eval_instructions = (0..i).map(move |j| {
+                    instr::mem_single(MemAccessKind::Write, 1, coeff_a_clone[j] as u32, coeff[j])
+                });
+                once(instr::mem_single(MemAccessKind::Write, 1, point_a as u32, point))
+                    .chain(poly_eval_instructions)
+                    .chain(once(instr::poly_eval(
+                        1,
+                        F::from_canonical_u32(point_a as u32),
+                        coeff_a
+                            .into_iter()
+                            .map(|co| F::from_canonical_u32(co as u32))
+                            .collect_vec(),
+                        F::from_canonical_u32(out_a as u32),
+                    )))
+                    .chain(once(instr::mem_single(MemAccessKind::Read, 1, out_a as u32, out)))
+            })
+            .collect::<Vec<Instruction<F>>>();
+
+        test_recursion_linear_program(instructions);
+    }
+}

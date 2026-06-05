@@ -81,3 +81,56 @@ impl<F: Field> UniPoly<F> {
     }
 
 }
+
+#[cfg(test)]
+mod tests {
+    use p3_baby_bear::BabyBear;
+    use super::*;
+
+    type  F = BabyBear;
+    fn test_from_evals_quad_helper<F: Field>() {
+        // polynomial is 2x^2 + 3x + 1
+        let e0 = F::one();
+        let e1 = F::from_canonical_u64(6u64);
+        let e2 = F::from_canonical_u64(15u64);
+        let evals = vec![e0, e1, e2];
+        let poly = UniPoly::from_evals(&evals);
+
+        assert_eq!(poly.eval_at_zero(), e0);
+        assert_eq!(poly.eval_at_one(), e1);
+        assert_eq!(poly.coeffs.len(), 3);
+        assert_eq!(poly.coeffs[0], F::one());
+        assert_eq!(poly.coeffs[1], F::from_canonical_u64(3u64));
+        assert_eq!(poly.coeffs[2], F::from_canonical_u64(2u64));
+
+        let e3 = F::from_canonical_u64(28u64);
+        assert_eq!(poly.evaluate(&F::from_canonical_u64(3u64)), e3);
+    }
+
+    fn test_from_evals_cubic_helper<F: Field>() {
+        // polynomial is x^3 + 2x^2 + 3x + 1
+        let e0 = F::one();
+        let e1 = F::from_canonical_u64(7u64);
+        let e2 = F::from_canonical_u64(23u64);
+        let e3 = F::from_canonical_u64(55u64);
+        let evals = vec![e0, e1, e2, e3];
+        let poly = UniPoly::from_evals(&evals);
+
+        assert_eq!(poly.eval_at_zero(), e0);
+        assert_eq!(poly.eval_at_one(), e1);
+        assert_eq!(poly.coeffs.len(), 4);
+        assert_eq!(poly.coeffs[0], F::one());
+        assert_eq!(poly.coeffs[1], F::from_canonical_u64(3u64));
+        assert_eq!(poly.coeffs[2], F::from_canonical_u64(2u64));
+        assert_eq!(poly.coeffs[3], F::one());
+
+        let e4 = F::from_canonical_u64(109u64);
+        assert_eq!(poly.evaluate(&F::from_canonical_u64(4u64)), e4);
+    }
+
+    #[test]
+    fn test_from_evals_quad() {
+        test_from_evals_quad_helper::<F>();
+        test_from_evals_cubic_helper::<F>();
+    }
+}

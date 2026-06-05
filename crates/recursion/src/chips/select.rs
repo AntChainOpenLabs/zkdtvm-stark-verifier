@@ -191,3 +191,135 @@ where
             .assert_eq(local.vals.out1 + local.vals.out2, local.vals.in1 + local.vals.in2);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{chips::test_fixtures, runtime::instruction as instr};
+    use dt_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use machine::tests::test_recursion_linear_program;
+    use p3_baby_bear::BabyBear;
+    use p3_field::AbstractField;
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    use super::*;
+
+    #[test]
+    pub fn prove_select() {
+        type SC = BabyBearPoseidon2;
+        type F = <SC as StarkGenericConfig>::Val;
+
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut addr = 0;
+
+        let instructions = (0..1000)
+            .flat_map(|_| {
+                let in1: F = rng.sample(rand::distributions::Standard);
+                let in2: F = rng.sample(rand::distributions::Standard);
+                let bit = F::from_bool(rng.gen_bool(0.5));
+                assert_eq!(bit * (bit - F::one()), F::zero());
+
+                let (out1, out2) = if bit == F::one() { (in2, in1) } else { (in1, in2) };
+                let alloc_size = 5;
+                let a = (0..alloc_size).map(|x| x + addr).collect::<Vec<_>>();
+                addr += alloc_size;
+                [
+                    instr::mem_single(MemAccessKind::Write, 1, a[0], bit),
+                    instr::mem_single(MemAccessKind::Write, 1, a[3], in1),
+                    instr::mem_single(MemAccessKind::Write, 1, a[4], in2),
+                    instr::select(1, 1, a[0], a[1], a[2], a[3], a[4]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[1], out1),
+                    instr::mem_single(MemAccessKind::Read, 1, a[2], out2),
+                ]
+            })
+            .collect::<Vec<Instruction<F>>>();
+
+        test_recursion_linear_program(instructions);
+    }
+
+    fn generate_trace_reference(
+        input: &ExecutionRecord<BabyBear>,
+        _: &mut ExecutionRecord<BabyBear>,
+    ) -> RowMajorMatrix<BabyBear> {
+        type F = BabyBear;
+
+        let events = &input.select_events;
+        let padded_nb_rows = SelectChip.num_rows(input).unwrap();
+        let mut values = vec![F::zero(); padded_nb_rows * SELECT_COLS];
+
+        let populate_len = events.len() * SELECT_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut SelectCols<_> = row.borrow_mut();
+                *cols = SelectCols { vals };
+            },
+        );
+
+        RowMajorMatrix::new(values, SELECT_COLS)
+    }
+
+    #[test]
+    fn generate_trace() {
+        let shard = test_fixtures::shard();
+        let mut execution_record = test_fixtures::default_execution_record();
+        let trace = SelectChip.generate_trace(&shard, &mut execution_record);
+        let ref_full = generate_trace_reference(&shard, &mut execution_record);
+        assert!(trace.total_height >= test_fixtures::MIN_TEST_CASES);
+        assert_eq!(trace.total_height, ref_full.height());
+        for i in 0..trace.main.height() {
+            assert_eq!(trace.main.row(i), ref_full.row(i));
+        }
+        for i in trace.main.height()..trace.total_height {
+            assert!(ref_full.row(i).iter().all(|&x| x == BabyBear::zero()));
+        }
+    }
+
+    fn generate_preprocessed_trace_reference(
+        program: &RecursionProgram<BabyBear>,
+    ) -> RowMajorMatrix<BabyBear> {
+        type F = BabyBear;
+
+        let instrs = program
+            .inner
+            .iter()
+            .filter_map(|instruction| match instruction {
+                Instruction::Select(x) => Some(x),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let padded_nb_rows = SelectChip.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![F::zero(); padded_nb_rows * SELECT_PREPROCESSED_COLS];
+
+        let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let SelectInstr { addrs, mult1, mult2 } = instr;
+                let access: &mut SelectPreprocessedCols<_> = row.borrow_mut();
+                *access = SelectPreprocessedCols {
+                    is_real: F::one(),
+                    addrs: addrs.to_owned(),
+                    mult1: mult1.to_owned(),
+                    mult2: mult2.to_owned(),
+                };
+            },
+        );
+
+        RowMajorMatrix::new(values, SELECT_PREPROCESSED_COLS)
+    }
+
+    #[test]
+    #[ignore = "Failing due to merge conflicts. Will be fixed shortly."]
+    fn generate_preprocessed_trace() {
+        let program = test_fixtures::program();
+        let trace = SelectChip.generate_preprocessed_trace(&program).unwrap();
+        let ref_full = generate_preprocessed_trace_reference(&program);
+        assert!(trace.total_height >= test_fixtures::MIN_TEST_CASES);
+        assert_eq!(trace.total_height, ref_full.height());
+        for i in 0..trace.main.height() {
+            assert_eq!(trace.main.row(i), ref_full.row(i));
+        }
+        for i in trace.main.height()..trace.total_height {
+            assert!(ref_full.row(i).iter().all(|&x| x == BabyBear::zero()));
+        }
+    }
+}

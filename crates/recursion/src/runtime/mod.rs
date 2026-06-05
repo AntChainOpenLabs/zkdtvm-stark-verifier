@@ -150,7 +150,6 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 struct VecEventCollector<F> {
     poly_eval_events: Mutex<Vec<PolyEvalEvent<F>>>,
     ext_exp_reverse_bits_events: Mutex<Vec<ExtExpReverseBitsEvent<F>>>,
-    sumcheck_round_events: Mutex<Vec<SumcheckRoundEvent<F>>>,
     prefix_sum_checks_events: Mutex<Vec<PrefixSumChecksEvent<F>>>,
     public_values: Mutex<Option<RecursionPublicValues<F>>>,
 }
@@ -160,7 +159,6 @@ impl<F: Default + Copy> VecEventCollector<F> {
         Self {
             poly_eval_events: Mutex::new(Vec::new()),
             ext_exp_reverse_bits_events: Mutex::new(Vec::new()),
-            sumcheck_round_events: Mutex::new(Vec::new()),
             prefix_sum_checks_events: Mutex::new(Vec::new()),
             public_values: Mutex::new(None),
         }
@@ -172,7 +170,6 @@ impl<F: Default + Copy> VecEventCollector<F> {
         RecursionPublicValues<F>,
         Vec<PolyEvalEvent<F>>,
         Vec<ExtExpReverseBitsEvent<F>>,
-        Vec<SumcheckRoundEvent<F>>,
         Vec<PrefixSumChecksEvent<F>>,
     ) {
         let pv = self.public_values.into_inner().unwrap().unwrap_or_default();
@@ -180,7 +177,6 @@ impl<F: Default + Copy> VecEventCollector<F> {
             pv,
             self.poly_eval_events.into_inner().unwrap(),
             self.ext_exp_reverse_bits_events.into_inner().unwrap(),
-            self.sumcheck_round_events.into_inner().unwrap(),
             self.prefix_sum_checks_events.into_inner().unwrap(),
         )
     }
@@ -191,8 +187,6 @@ impl<F: Default + Copy> VecEventCollector<F> {
             .extend(other.poly_eval_events.into_inner().unwrap());
         self.ext_exp_reverse_bits_events.lock().unwrap()
             .extend(other.ext_exp_reverse_bits_events.into_inner().unwrap());
-        self.sumcheck_round_events.lock().unwrap()
-            .extend(other.sumcheck_round_events.into_inner().unwrap());
         self.prefix_sum_checks_events.lock().unwrap()
             .extend(other.prefix_sum_checks_events.into_inner().unwrap());
     }
@@ -405,6 +399,20 @@ where
                     Poseidon2Event { input: in_vals, output: perm_output },
                 ));
             }
+            Instruction::Poseidon2Skinny(instr) => {
+                let Poseidon2SkinnyInstr { addrs: Poseidon2Io { input, output }, mults: _, scratch_addrs: _ } =
+                    instr.as_ref();
+                let in_vals = std::array::from_fn(|i| memory.mr_at(resolved[i] as usize).val[0]);
+                let mut perm_output = in_vals;
+                perm.permute_mut(&mut perm_output);
+
+                for i in 0..16 {
+                    memory.mw_at(resolved[16 + i] as usize, Block::from(perm_output[i]));
+                }
+                record.poseidon2_skinny_events.get_unchecked(offset).get().write(MaybeUninit::new(
+                    Poseidon2Event { input: in_vals, output: perm_output },
+                ));
+            }
             Instruction::Select(SelectInstr {
                 addrs: SelectIo { bit, out1, out2, in1, in2 },
                 mult1: _,
@@ -537,82 +545,70 @@ where
                     .push(PolyEvalEvent { out: result, point, coeff: coeffs });
             }
             Instruction::ExtExpReverseBits(ExtExpReverseBitsInstr {
-                addrs: ExtExpReverseBitsIo { base, exp, result },
+                addrs: ExtExpReverseBitsIo { base, exp, prev_acc_vec, acc_vec },
                 mult: _,
-                chain_accum_addrs: _,
             }) => {
+                let n = exp.len();
                 let base_val = memory.mr_at(resolved[0] as usize).val;
                 let exp_bits: Vec<_> =
-                    exp.iter().enumerate().map(|(i, _)| memory.mr_at(resolved[1 + i] as usize).val[0]).collect();
-                let mut out = BinomialExtension::from_base(F::one());
-                exp_bits.iter().map(|&val| val.as_canonical_u32()).for_each(|val| {
-                    out = out * out;
-                    if val == 1 {
-                        out = out * BinomialExtension::from_block(base_val);
-                    }
-                });
-                let out = Block::from(out.0);
-                let result_idx = 1 + exp.len();
-                memory.mw_at(resolved[result_idx] as usize, out);
+                    (0..n).map(|i| memory.mr_at(resolved[1 + i] as usize).val[0]).collect();
+                // prev_acc starts at offset 1+n, acc starts at 1+2n
+                let mut prev_acc_vals = Vec::with_capacity(n);
+                let mut acc_vals = Vec::with_capacity(n);
+                let prev_acc_base = 1 + n;
+                let acc_base = 1 + 2 * n;
+                for i in 0..n {
+                    let prev_acc_block = memory.mr_at(resolved[prev_acc_base + i] as usize).val;
+                    prev_acc_vals.push(prev_acc_block);
+                    let prev_ef = BinomialExtension::from_block(prev_acc_block);
+                    let acc_ef = prev_ef * prev_ef * if exp_bits[i].as_canonical_u32() == 1 {
+                        BinomialExtension::from_block(base_val)
+                    } else {
+                        BinomialExtension::from_base(F::one())
+                    };
+                    let acc_block = Block::from(acc_ef.0);
+                    acc_vals.push(acc_block);
+                    memory.mw_at(resolved[acc_base + i] as usize, acc_block);
+                }
                 vec_events.ext_exp_reverse_bits_events.lock().unwrap()
                     .push(ExtExpReverseBitsEvent {
-                        result: out,
                         base: base_val,
                         exp: exp_bits,
-                    });
-            }
-            Instruction::SumcheckRound(ref instr) => {
-                let SumcheckRoundInstr {
-                    addrs: SumcheckRoundIo { coeffs, challenge, claim, new_claim },
-                    mult: _,
-                    chain_rs_addrs: _,
-                    chain_ha_addrs: _,
-                } = instr.as_ref();
-                let challenge_val = memory.mr_at(resolved[0] as usize).val;
-                let claim_val = memory.mr_at(resolved[1] as usize).val;
-                let coeff_vals: Vec<_> =
-                    coeffs.iter().enumerate().map(|(i, _)| memory.mr_at(resolved[3 + i] as usize).val).collect();
-                let challenge_ef = EF::from_base_fn(|i| challenge_val.0[i]);
-                let result = coeff_vals[1..]
-                    .iter()
-                    .fold(EF::from_base_fn(|i| coeff_vals[0].0[i]), |acc, &x| {
-                        acc * challenge_ef + EF::from_base_fn(|i| x.0[i])
-                    });
-                let out = Block::from(result.as_base_slice());
-                memory.mw_at(resolved[2] as usize, out);
-                vec_events.sumcheck_round_events.lock().unwrap()
-                    .push(SumcheckRoundEvent {
-                        coeffs: coeff_vals,
-                        challenge: challenge_val,
-                        claim: claim_val,
-                        new_claim: out,
+                        prev_acc_vec: prev_acc_vals,
+                        acc_vec: acc_vals,
                     });
             }
             Instruction::PrefixSumChecks(ref instr) => {
                 let PrefixSumChecksInstr {
-                    addrs: PrefixSumChecksIo { x1_vec, x2_vec, init_acc, result },
+                    addrs: PrefixSumChecksIo { x1_vec, x2_vec, prev_acc_vec, acc_vec },
                     mult: _,
-                    chain_acc_addrs: _,
                 } = instr.as_ref();
                 let n = x1_vec.len();
-                let x1_vals: Vec<_> = (0..n).map(|i| memory.mr_at(resolved[2 + i] as usize).val).collect();
-                let x2_vals: Vec<_> = (0..n).map(|i| memory.mr_at(resolved[2 + n + i] as usize).val).collect();
-                let init_acc_val = memory.mr_at(resolved[0] as usize).val;
-                let mut acc = EF::from_base_fn(|i| init_acc_val.0[i]);
-                for (x1, x2) in x1_vals.iter().zip_eq(x2_vals.iter()) {
-                    let x1_ef = EF::from_base_fn(|i| x1.0[i]);
-                    let x2_ef = EF::from_base_fn(|i| x2.0[i]);
+                // Layout: x1[0..n], x2[n..2n], prev_acc[2n..3n], acc[3n..4n]
+                let x1_vals: Vec<_> = (0..n).map(|i| memory.mr_at(resolved[i] as usize).val).collect();
+                let x2_vals: Vec<_> = (0..n).map(|i| memory.mr_at(resolved[n + i] as usize).val).collect();
+                let prev_acc_base = 2 * n;
+                let acc_base_idx = 3 * n;
+                let mut prev_acc_vals = Vec::with_capacity(n);
+                let mut acc_vals = Vec::with_capacity(n);
+                for i in 0..n {
+                    let prev_acc_block = memory.mr_at(resolved[prev_acc_base + i] as usize).val;
+                    prev_acc_vals.push(prev_acc_block);
+                    let prev_ef = EF::from_base_fn(|j| prev_acc_block.0[j]);
+                    let x1_ef = EF::from_base_fn(|j| x1_vals[i].0[j]);
+                    let x2_ef = EF::from_base_fn(|j| x2_vals[i].0[j]);
                     let eq_val = x1_ef * x2_ef + (EF::one() - x1_ef) * (EF::one() - x2_ef);
-                    acc *= eq_val;
+                    let acc_ef = prev_ef * eq_val;
+                    let acc_block = Block::from(acc_ef.as_base_slice());
+                    acc_vals.push(acc_block);
+                    memory.mw_at(resolved[acc_base_idx + i] as usize, acc_block);
                 }
-                let out = Block::from(acc.as_base_slice());
-                memory.mw_at(resolved[1] as usize, out);
                 vec_events.prefix_sum_checks_events.lock().unwrap()
                     .push(PrefixSumChecksEvent {
                         x1_vec: x1_vals,
                         x2_vec: x2_vals,
-                        init_acc: init_acc_val,
-                        result: out,
+                        prev_acc_vec: prev_acc_vals,
+                        acc_vec: acc_vals,
                     });
             }
         }
@@ -752,12 +748,11 @@ where
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
         let ec = &self.program.event_counts;
         tracing::info!(
-            "RECURSION_INSTR_DIST base_alu={} ext_alu={} poseidon2={} select={} mem_const={} mem_var={} poly_eval={} ext_exp={} sumcheck={} prefix={} commit_pv={}",
+            "RECURSION_INSTR_DIST base_alu={} ext_alu={} poseidon2={} select={} mem_const={} mem_var={} poly_eval={} ext_exp={} prefix={}",
             ec.base_alu_events, ec.ext_alu_events, ec.poseidon2_wide_events,
             ec.select_events, ec.mem_const_events, ec.mem_var_events,
             ec.poly_eval_events, ec.ext_exp_reverse_bits_events,
-            ec.sumcheck_round_events, ec.prefix_sum_checks_events,
-            ec.commit_pv_hash_events,
+            ec.prefix_sum_checks_events,
         );
         let unsafe_record = UnsafeRecord::<F>::new(&self.program.event_counts);
         let vec_events = VecEventCollector::new();
@@ -784,14 +779,13 @@ where
             )
         }?;
 
-        let (public_values, poly, ext_exp, sumcheck, prefix) = vec_events.into_parts();
+        let (public_values, poly, ext_exp, prefix) = vec_events.into_parts();
         self.record = unsafe {
             unsafe_record.into_record(
                 self.program.clone(),
                 public_values,
                 poly,
                 ext_exp,
-                sumcheck,
                 prefix,
             )
         };
@@ -802,11 +796,24 @@ where
 
 struct ExecState<'a, 'b, F, Diffusion, const SBOX: u64 = 7> {
     pub env: ExecEnv<'a, 'b, F, Diffusion, SBOX>,
+    #[cfg(feature = "debug")]
+    pub last_trace: Option<Trace>,
 }
 
 impl<F, Diffusion, const SBOX: u64> ExecState<'_, '_, F, Diffusion, SBOX> {
     fn resolve_trace(&mut self) -> Option<&mut Trace> {
-        None
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "debug")] {
+                // False positive.
+                #[allow(clippy::manual_inspect)]
+                self.last_trace.as_mut().map(|trace| {
+                    trace.resolve();
+                    trace
+                })
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -815,13 +822,27 @@ where
     ExecEnv<'a, 'b, F, Diffusion, SBOX>: Clone,
 {
     fn clone(&self) -> Self {
-        let Self { env } = self;
-        Self { env: env.clone() }
+        let Self {
+            env,
+            #[cfg(feature = "debug")]
+            last_trace,
+        } = self;
+        Self {
+            env: env.clone(),
+            #[cfg(feature = "debug")]
+            last_trace: last_trace.clone(),
+        }
     }
 
     fn clone_from(&mut self, source: &Self) {
-        let Self { env } = self;
+        let Self {
+            env,
+            #[cfg(feature = "debug")]
+            last_trace,
+        } = self;
         env.clone_from(&source.env);
+        #[cfg(feature = "debug")]
+        last_trace.clone_from(&source.last_trace);
     }
 }
 

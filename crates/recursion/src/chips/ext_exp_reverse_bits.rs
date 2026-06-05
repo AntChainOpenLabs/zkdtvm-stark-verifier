@@ -3,7 +3,8 @@
 use super::mem::{MemoryAccessCols, MemoryAccessColsChips};
 use crate::air::Block;
 use crate::{
-    builder::DTRecursionAirBuilder, runtime::ExecutionRecord, ExtExpReverseBitsInstr, Instruction,
+    builder::DTRecursionAirBuilder, runtime::ExecutionRecord, Address, ExtExpReverseBitsInstr,
+    Instruction,
 };
 use core::borrow::Borrow;
 use crate::utils::{next_power_of_two, padded_rows_threshold};
@@ -29,15 +30,11 @@ pub struct ExtExpReverseBitsChip<const DEGREE: usize>;
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ExtExpReverseBitsPreprocessedCols<T: Copy> {
-    pub x_mem: MemoryAccessColsChips<T>,
-    pub exponent_mem: MemoryAccessColsChips<T>,
-    pub result_mem: MemoryAccessColsChips<T>,
-    pub iteration_num: T,
-    pub is_first: T,
-    pub is_last: T,
+    pub x_addr: Address<T>,
+    pub exponent_addr: Address<T>,
+    pub prev_acc_addr: Address<T>,
+    pub acc_mem: MemoryAccessColsChips<T>,
     pub is_real: T,
-    pub chain_accum_out: MemoryAccessColsChips<T>,
-    pub chain_accum_in: MemoryAccessColsChips<T>,
 }
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
@@ -49,17 +46,11 @@ pub struct ExtExpReverseBitsCols<T: Copy> {
     /// The current bit of the exponent. This is read from memory.
     pub current_bit: T,
 
-    /// The previous accumulator squared.
-    pub prev_accum_squared: Block<T>,
+    /// The previous accumulator value.
+    pub prev_acc: Block<T>,
 
-    /// Is set to the value local.prev_accum_squared * local.multiplier.
-    pub prev_accum_squared_times_multiplier: Block<T>,
-
-    /// The accumulator of the current iteration.
-    pub accum: Block<T>,
-
-    /// The accumulator squared.
-    pub accum_squared: Block<T>,
+    /// The current accumulator value.
+    pub acc: Block<T>,
 
     /// A column which equals x if `current_bit` is on, and 1 otherwise.
     pub multiplier: Block<T>,
@@ -90,37 +81,20 @@ impl<F: Field, const DEGREE: usize> MachineAir<F> for ExtExpReverseBitsChip<DEGR
 
         input.ext_exp_reverse_bits_events.iter().for_each(|event| {
             let mut rows = vec![vec![F::zero(); NUM_EXT_EXP_REVERSE_BITS_COLS]; event.exp.len()];
-            let mut accum = Block::<F>::from(F::one());
 
             rows.iter_mut().enumerate().for_each(|(i, row)| {
                 let cols: &mut ExtExpReverseBitsCols<F> = row.as_mut_slice().borrow_mut();
 
                 cols.x = event.base;
                 cols.current_bit = event.exp[i];
+                cols.prev_acc = event.prev_acc_vec[i];
+                cols.acc = event.acc_vec[i];
                 let one_block = Block::<F>::from(F::one());
                 if cols.current_bit == F::one() {
                     cols.multiplier = cols.x;
                 } else {
                     cols.multiplier = one_block;
                 }
-
-                let prev_accum = accum;
-                accum = (BinomialExtension(prev_accum.0)
-                    * BinomialExtension(prev_accum.0)
-                    * BinomialExtension(cols.multiplier.0))
-                .0
-                .into();
-
-                cols.accum = accum;
-                cols.accum_squared =
-                    (BinomialExtension(accum.0) * BinomialExtension(accum.0)).0.into();
-                cols.prev_accum_squared =
-                    (BinomialExtension(prev_accum.0) * BinomialExtension(prev_accum.0)).0.into();
-                cols.prev_accum_squared_times_multiplier =
-                    (BinomialExtension(cols.prev_accum_squared.0)
-                        * BinomialExtension(cols.multiplier.0))
-                    .0
-                    .into();
             });
             overall_rows.extend(rows);
         });
@@ -161,31 +135,21 @@ impl<F: Field, const DEGREE: usize> MachineAir<F> for ExtExpReverseBitsChip<DEGR
                 _ => None,
             })
             .for_each(|instruction: &ExtExpReverseBitsInstr<F>| {
-                let ExtExpReverseBitsInstr { addrs, mult, chain_accum_addrs } = instruction;
+                let ExtExpReverseBitsInstr { addrs, mult } = instruction;
                 let num_bits = addrs.exp.len();
                 let mut row_add =
                     vec![[F::zero(); NUM_EXT_EXP_REVERSE_BITS_PREPROCESSED_COLS]; num_bits];
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExtExpReverseBitsPreprocessedCols<F> =
                         row.as_mut_slice().borrow_mut();
-                    row.iteration_num = F::from_canonical_u32(i as u32);
-                    row.is_first = F::from_bool(i == 0);
-                    row.is_last = F::from_bool(i == num_bits - 1);
                     row.is_real = F::one();
-                    row.x_mem = MemoryAccessCols { addr: addrs.base, mult: -F::from_bool(i == 0) };
-                    row.exponent_mem = MemoryAccessCols { addr: addrs.exp[i], mult: F::neg_one() };
-                    row.result_mem = MemoryAccessCols {
-                        addr: addrs.result,
-                        mult: *mult * F::from_bool(i == num_bits - 1),
+                    row.x_addr = addrs.base;
+                    row.exponent_addr = addrs.exp[i];
+                    row.prev_acc_addr = addrs.prev_acc_vec[i];
+                    row.acc_mem = MemoryAccessCols {
+                        addr: addrs.acc_vec[i],
+                        mult: if i == num_bits - 1 { *mult } else { F::one() },
                     };
-                    if i < num_bits - 1 {
-                        row.chain_accum_out =
-                            MemoryAccessCols { addr: chain_accum_addrs[i], mult: F::one() };
-                    }
-                    if i > 0 {
-                        row.chain_accum_in =
-                            MemoryAccessCols { addr: chain_accum_addrs[i - 1], mult: F::neg_one() };
-                    }
                 });
                 rows.extend(row_add);
             });
@@ -222,27 +186,18 @@ impl<const DEGREE: usize> ExtExpReverseBitsChip<DEGREE> {
             builder.assert_eq(lhs, rhs);
         }
 
-        let local_accum = local.accum.as_extension::<AB>();
+        let local_acc = local.acc.as_extension::<AB>();
+        let local_prev_acc = local.prev_acc.as_extension::<AB>();
         let local_multiplier = local.multiplier.as_extension::<AB>();
-        let local_prev_accum_squared_times_multiplier =
-            local.prev_accum_squared_times_multiplier.as_extension::<AB>();
-        let local_prev_accum_squared = local.prev_accum_squared.as_extension::<AB>();
-        let local_accum_squared = local.accum_squared.as_extension::<AB>();
 
-        // Read x from memory (only on first row).
-        builder.send_block(local_prepr.x_mem.addr, local.x, local_prepr.x_mem.mult);
+        // Receive x from memory.
+        builder.receive_block(local_prepr.x_addr, local.x, local_prepr.is_real);
 
-        // Read exponent bit from memory.
-        builder.send_single(
-            local_prepr.exponent_mem.addr,
-            local.current_bit,
-            local_prepr.exponent_mem.mult,
-        );
+        // Receive exponent bit from memory.
+        builder.receive_single(local_prepr.exponent_addr, local.current_bit, local_prepr.is_real);
 
-        // On first row: accum = multiplier.
-        builder
-            .when(local_prepr.is_first)
-            .assert_ext_eq(local_accum.clone(), local_multiplier.clone());
+        // Receive prev_acc from memory.
+        builder.receive_block(local_prepr.prev_acc_addr, local.prev_acc, local_prepr.is_real);
 
         // multiplier = 1 + bit*(x − 1).
         let bit: AB::Expr = local.current_bit.into();
@@ -255,37 +210,14 @@ impl<const DEGREE: usize> ExtExpReverseBitsChip<DEGREE> {
                 .assert_eq(mul_k - one_k.clone(), bit.clone() * (x_k - one_k));
         }
 
-        // prev_accum_squared_times_multiplier = prev_accum_squared * multiplier.
-        builder.when(local_prepr.is_real).assert_ext_eq(
-            local_prev_accum_squared_times_multiplier.clone(),
-            local_prev_accum_squared.clone() * local_multiplier.clone(),
+        // acc = prev_acc^2 * multiplier.
+        builder.assert_ext_eq(
+            local_acc.clone(),
+            local_prev_acc.clone() * local_prev_acc.clone() * local_multiplier.clone(),
         );
 
-        // On non-first rows: accum = prev_accum_squared * multiplier.
-        builder
-            .when(local_prepr.is_real)
-            .when_not(local_prepr.is_first)
-            .assert_ext_eq(local_accum.clone(), local_prev_accum_squared_times_multiplier.clone());
-
-        // accum_squared = accum * accum.
-        builder
-            .when(local_prepr.is_real)
-            .assert_ext_eq(local_accum_squared.clone(), local_accum.clone() * local_accum.clone());
-
-        // Write result.
-        builder.send_block(local_prepr.result_mem.addr, local.accum, local_prepr.result_mem.mult);
-
-        // Chain interactions for accum_squared.
-        builder.send_block(
-            local_prepr.chain_accum_out.addr,
-            local.accum_squared,
-            local_prepr.chain_accum_out.mult,
-        );
-        builder.send_block(
-            local_prepr.chain_accum_in.addr,
-            local.prev_accum_squared,
-            local_prepr.chain_accum_in.mult,
-        );
+        // Send acc to memory.
+        builder.send_block(local_prepr.acc_mem.addr, local.acc, local_prepr.acc_mem.mult);
     }
 }
 
@@ -301,5 +233,124 @@ where
         let prep_local = prep.row_slice(0);
         let prep_local: &ExtExpReverseBitsPreprocessedCols<_> = (*prep_local).borrow();
         self.eval_ext_exp_reverse_bits::<AB>(builder, local, prep_local);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::print_stdout)]
+
+    use super::*;
+    use crate::{
+        machine::tests::test_recursion_linear_program, runtime::instruction as instr,
+        stark::BabyBearPoseidon2Outer, Instruction, MemAccessKind,
+    };
+    use crate::utils::setup_logger;
+    use dt_stark::StarkGenericConfig;
+    use itertools::Itertools;
+    use p3_field::extension::BinomialExtensionField;
+    use p3_field::{AbstractExtensionField, AbstractField};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::iter::once;
+    use tracing::debug;
+
+    const DEGREE: usize = 3;
+
+    #[test]
+    fn prove_babybear_circuit_erbl() {
+        setup_logger();
+        type SC = BabyBearPoseidon2Outer;
+        type F = <SC as StarkGenericConfig>::Val;
+
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut random_ext = move || {
+            let inner: [F; 4] = core::array::from_fn(|_| rng.sample(rand::distributions::Standard));
+            BinomialExtensionField::<F, 4>::from_base_slice(&inner)
+        };
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let mut random_bit = move || rng.gen_range(0..2);
+        let mut addr = 0;
+
+        let instructions = (1..15)
+            .flat_map(|i| {
+                let base = random_ext();
+                let exponent_bits = vec![random_bit(); i];
+                let exponent = F::from_canonical_u32(
+                    exponent_bits
+                        .clone()
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .fold(0, |acc, (i, x)| acc + x * (1 << i)),
+                );
+                let mut out = BinomialExtensionField::from_base(F::one());
+                exponent_bits.clone().into_iter().for_each(|val| {
+                    out = out * out;
+                    if val == 1 {
+                        out = out * base;
+                    }
+                });
+                if i < 5 {
+                    debug!("base: {:?}, exponent: {:?}, out: {:?}", base, exponent, out);
+                }
+
+                let alloc_size = i + 2;
+                let exp_a = (0..i).map(|x| x + addr + 1).collect::<Vec<_>>();
+                let exp_a_clone = exp_a.clone();
+                let x_a = addr;
+                addr += alloc_size;
+                
+                // Allocate prev_acc_vec and acc_vec
+                // prev_acc_vec[0] = constant 1 (will be written by compiler)
+                // prev_acc_vec[1..] = acc_vec[0..n-1]
+                // acc_vec[n-1] = result
+                let temp_acc_addrs: Vec<_> = (0..i.saturating_sub(1)).map(|j| addr + j).collect();
+                addr += temp_acc_addrs.len();
+                let result_addr = addr;
+                addr += 1;
+                
+                let prev_acc_a: Vec<_> = std::iter::once(addr)  // constant 1 address
+                    .chain(temp_acc_addrs.iter().copied())
+                    .collect();
+                let acc_a: Vec<_> = temp_acc_addrs.iter().copied()
+                    .chain(std::iter::once(result_addr))
+                    .collect();
+                addr += 1;  // for constant 1
+                
+                let exp_bit_instructions = (0..i).map(move |j| {
+                    instr::mem_single(
+                        MemAccessKind::Write,
+                        1,
+                        exp_a_clone[j] as u32,
+                        F::from_canonical_u32(exponent_bits.clone()[j]),
+                    )
+                });
+                
+                // Write initial prev_acc = 1 for first row
+                let init_prev_acc = instr::mem_ext(
+                    MemAccessKind::Write,
+                    1,
+                    prev_acc_a[0] as u32,
+                    BinomialExtensionField::<F, 4>::from_base(F::one()),
+                );
+                
+                once(instr::mem_ext(MemAccessKind::Write, 1, x_a as u32, base))
+                    .chain(exp_bit_instructions)
+                    .chain(once(init_prev_acc))
+                    .chain(once(instr::ext_exp_reverse_bits(
+                        1,
+                        F::from_canonical_u32(x_a as u32),
+                        exp_a
+                            .into_iter()
+                            .map(|bit| F::from_canonical_u32(bit as u32))
+                            .collect_vec(),
+                        prev_acc_a.iter().map(|a| F::from_canonical_u32(*a as u32)).collect(),
+                        acc_a.iter().map(|a| F::from_canonical_u32(*a as u32)).collect(),
+                    )))
+                    .chain(once(instr::mem_ext(MemAccessKind::Read, 1, result_addr as u32, out)))
+            })
+            .collect::<Vec<Instruction<F>>>();
+
+        test_recursion_linear_program(instructions);
     }
 }

@@ -1,7 +1,7 @@
 use std::hash::Hash;
 
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::{ExtensionField, Field, PrimeField32};
+use p3_field::{ExtensionField, Field, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_max_constraint_degree_sc, SymbolicAirBuilder};
 use p3_util::log2_ceil_usize;
@@ -13,7 +13,10 @@ use crate::{
     sumcheck::trace::CompressedMatrix,
 };
 
-use super::{eval_permutation_constraints, scoped_interactions, PROOF_MAX_NUM_PVS};
+use super::{
+    eval_permutation_constraints, generate_compressed_permutation_trace,
+    generate_permutation_trace, scoped_interactions, PROOF_MAX_NUM_PVS,
+};
 
 /// An Air that encodes lookups based on interactions.
 #[derive(Clone)]
@@ -128,6 +131,51 @@ where
     #[inline]
     pub fn num_receives_by_kind(&self, kind: InteractionKind) -> usize {
         self.receives.iter().filter(|i| i.kind == kind).count()
+    }
+
+    /// Generates a permutation trace for the given matrix.
+    pub fn generate_permutation_trace<EF: ExtensionField<F>>(
+        &self,
+        preprocessed: Option<&RowMajorMatrix<F>>,
+        main: &RowMajorMatrix<F>,
+        random_elements: &[EF],
+    ) -> (RowMajorMatrix<EF>, EF)
+    where
+        F: PrimeField,
+        A: MachineAir<F>,
+    {
+        let batch_size = self.logup_batch_size();
+        generate_permutation_trace::<F, EF>(
+            &self.sends,
+            &self.receives,
+            preprocessed,
+            main,
+            random_elements,
+            batch_size,
+        )
+    }
+
+    /// Generates the permutation trace in compressed form (without materializing the full matrix).
+    pub fn generate_compressed_permutation_trace<EF: ExtensionField<F>>(
+        &self,
+        preprocessed: Option<&CompressedMatrix<F>>,
+        main: &CompressedMatrix<F>,
+        random_elements: &[EF],
+    ) -> (CompressedMatrix<EF>, EF)
+    where
+        F: PrimeField,
+        A: MachineAir<F>,
+    {
+        let batch_size = self.logup_batch_size();
+        generate_compressed_permutation_trace::<F, EF>(
+            &self.sends,
+            &self.receives,
+            preprocessed,
+            main,
+            random_elements,
+            batch_size,
+            &self.name(),
+        )
     }
 
     /// Returns the width of the permutation trace for sumcheck-based proving system.

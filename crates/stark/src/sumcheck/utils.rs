@@ -19,7 +19,7 @@ use super::types::{EqPoly, UniPolyEvals, UnivariatePolynomial};
 ///
 /// Chips with smaller log-heights join later rounds. This function returns a vector
 /// where `result[i]` is the cumulative chip count at round `i`.
-pub fn compute_num_chips_each_round(
+pub(crate) fn compute_num_chips_each_round(
     log_heights: &[usize],
     num_skip_rounds: usize,
     log_height_threshold: usize,
@@ -60,7 +60,7 @@ pub fn compute_num_chips_each_round(
 ///
 /// For each chip with `num_constraints[i]` constraints, collects the next batch of
 /// consecutive powers of `alpha` (in reverse order within each batch).
-pub fn compute_powers_of_alpha<F: Field>(
+pub(crate) fn compute_powers_of_alpha<F: Field>(
     alpha: F,
     num_constraints: Vec<usize>,
 ) -> Vec<Vec<F>> {
@@ -96,11 +96,7 @@ pub mod selectors {
         _total_height: usize,
         _stored_height: usize,
     ) -> P {
-        let mut packed_inputs = vec![F::zero(); P::WIDTH];
-        if offset == 0 {
-            packed_inputs[0] = first_value;
-        }
-        *P::from_slice(&packed_inputs)
+        P::from_fn(|i| if i == 0 && offset == 0 { first_value } else { F::zero() })
     }
 
     /// Build a packed last-row selector for base-field constraints.
@@ -114,14 +110,14 @@ pub mod selectors {
             return P::zero();
         }
         // stored_height == total_height
-        let mut packed_inputs = vec![F::zero(); P::WIDTH];
         if total_height <= P::WIDTH {
             debug_assert_eq!(offset, 0);
-            packed_inputs[total_height - 1] = last_value;
+            P::from_fn(|i| if i + 1 == total_height { last_value } else { F::zero() })
         } else if offset + P::WIDTH == total_height {
-            packed_inputs[P::WIDTH - 1] = last_value;
+            P::from_fn(|i| if i + 1 == P::WIDTH { last_value } else { F::zero() })
+        } else {
+            P::zero()
         }
-        *P::from_slice(&packed_inputs)
     }
 
     /// Build a packed first-row selector for extension-field constraints.
@@ -187,7 +183,6 @@ pub mod selectors {
 ///
 /// Returns `(evens, odds)` where `evens` contains elements at indices 0, 2, 4, ...
 /// and `odds` contains elements at indices 1, 3, 5, ...
-#[allow(dead_code)]
 pub(crate) fn deinterleave<F: Copy>(data: &[F]) -> (Vec<F>, Vec<F>) {
     let half = data.len() / 2;
     let mut evens = Vec::with_capacity(half);
@@ -311,7 +306,6 @@ pub fn linear_combination_slices<F: Field>(weights: &[F], vectors: &[&[F]]) -> V
 /// Multiply an eval-form polynomial by the next unfixed eq-polynomial factor (pointwise).
 ///
 /// Extends `poly.evals` to accommodate the increased degree before multiplying.
-#[allow(dead_code)]
 pub(crate) fn multiply_evals_by_eq<F: Field + PrimeField32, EF: ExtensionField<F>>(
     poly: &mut UniPolyEvals<EF>,
     eq_poly: &EqPoly<F, EF>,

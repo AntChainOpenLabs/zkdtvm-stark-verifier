@@ -1,6 +1,3 @@
-//! The air module contains the AIR constraints for the poseidon2 chip.  
-//! At the moment, we're only including memory constraints to test the new memory argument.
-
 use std::{array, borrow::Borrow};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
@@ -11,12 +8,11 @@ use crate::{builder::DTRecursionAirBuilder, chips::poseidon2_skinny::columns::Po
 
 use super::{
     columns::{preprocessed::Poseidon2PreprocessedCols, NUM_POSEIDON2_COLS},
-    external_linear_layer, internal_linear_layer, Poseidon2SkinnyChip, NUM_INTERNAL_ROUNDS, WIDTH,
+    external_linear_layer, internal_linear_layer, Poseidon2SkinnyChip, WIDTH,
 };
 
 impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2SkinnyChip<DEGREE> {
     fn width(&self) -> usize {
-        // We only support machines with degree 9.
         assert!(DEGREE >= 9);
         NUM_POSEIDON2_COLS
     }
@@ -27,139 +23,101 @@ where
     AB: DTRecursionAirBuilder + PairBuilder,
     AB::Var: 'static,
 {
+    /// Single-row evaluation of one Poseidon2 round.
+    ///
+    /// Each row carries `state_in` and `state_out` of one round. Cross-round chaining
+    /// (i.e. `row[r].state_out == row[r+1].state_in`) is enforced through memory lookups,
+    /// not constraints; here we only constrain the per-row transition
+    /// `state_out = round(state_in)`.
     fn eval(&self, builder: &mut AB) {
-        // We only support machines with degree 9.
         assert!(DEGREE >= 9);
 
         let main = builder.main();
         let local_row = main.row_slice(0);
-        let next_row_idx = if main.height() > 1 { 1 } else { 0 };
-        let next_row = main.row_slice(next_row_idx);
         let local_row: &Poseidon2<_> = (*local_row).borrow();
-        let next_row: &Poseidon2<_> = (*next_row).borrow();
         let prepr = builder.preprocessed();
         let prep_local = prepr.row_slice(0);
         let prep_local: &Poseidon2PreprocessedCols<_> = (*prep_local).borrow();
 
-        // Dummy constraints to normalize to DEGREE.
-        let lhs = (0..DEGREE).map(|_| local_row.state_var[0].into()).product::<AB::Expr>();
-        let rhs = (0..DEGREE).map(|_| local_row.state_var[0].into()).product::<AB::Expr>();
-        builder.assert_eq(lhs, rhs);
-
-        // For now, include only memory constraints.
-        (0..WIDTH).for_each(|i| {
+        // ------------------------------------------------------------------
+        // 1. Memory interactions on the LogUp bus (send-only convention).
+        // ------------------------------------------------------------------
+        for i in 0..WIDTH {
             builder.send_single(
-                prep_local.memory_preprocessed[i].addr,
-                local_row.state_var[i],
-                prep_local.memory_preprocessed[i].mult,
-            )
-        });
-
-        self.eval_input_round(builder, local_row, prep_local, next_row);
-
-        self.eval_external_round(builder, local_row, prep_local, next_row);
-
-        self.eval_internal_rounds(
-            builder,
-            local_row,
-            next_row,
-            prep_local.round_counters_preprocessed.round_constants,
-            prep_local.round_counters_preprocessed.is_internal_round,
-        );
-    }
-}
-
-impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
-    fn eval_input_round<AB: DTRecursionAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local_row: &Poseidon2<AB::Var>,
-        prep_local: &Poseidon2PreprocessedCols<AB::Var>,
-        next_row: &Poseidon2<AB::Var>,
-    ) {
-        let mut state: [AB::Expr; WIDTH] = array::from_fn(|i| local_row.state_var[i].into());
-
-        // Apply the linear layer.
-        external_linear_layer(&mut state);
-
-        let next_state = next_row.state_var;
-        for i in 0..WIDTH {
-            builder
-                .when_not(builder.is_last_row())
-                .when(prep_local.round_counters_preprocessed.is_input_round)
-                .assert_eq(next_state[i], state[i].clone());
-        }
-    }
-
-    fn eval_external_round<AB: DTRecursionAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local_row: &Poseidon2<AB::Var>,
-        prep_local: &Poseidon2PreprocessedCols<AB::Var>,
-        next_row: &Poseidon2<AB::Var>,
-    ) {
-        let local_state = local_row.state_var;
-
-        // Add the round constants.
-        let add_rc: [AB::Expr; WIDTH] = core::array::from_fn(|i| {
-            local_state[i].into() + prep_local.round_counters_preprocessed.round_constants[i]
-        });
-
-        // Apply the sboxes.
-        // See `populate_external_round` for why we don't have columns for the sbox output here.
-        // BabyBear uses SBOX_DEGREE=7 (x^7 = x^3 * x^3 * x), KoalaBear uses SBOX_DEGREE=3 (x^3).
-        let mut sbox_result: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
-        for i in 0..WIDTH {
-            let sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
-            sbox_result[i] = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc[i].clone();
+                prep_local.state_in_addrs[i],
+                local_row.state_in[i],
+                prep_local.state_in_neg_mult,
+            );
+            builder.send_single(
+                prep_local.state_out_mem[i].addr,
+                local_row.state_out[i],
+                prep_local.state_out_mem[i].mult,
+            );
         }
 
-        // Apply the linear layer.
-        let mut state = sbox_result;
-        external_linear_layer(&mut state);
+        let is_real: AB::Expr = prep_local.is_real.into();
+        let is_internal: AB::Expr = prep_local.round_kind.into();
+        let is_external: AB::Expr = AB::Expr::one() - is_internal.clone();
+        let is_first: AB::Expr = prep_local.is_first_round.into();
+        let not_first: AB::Expr = AB::Expr::one() - is_first.clone();
 
-        let next_state = next_row.state_var;
-        for i in 0..WIDTH {
-            builder
-                .when_not(builder.is_last_row())
-                .when(prep_local.round_counters_preprocessed.is_external_round)
-                .assert_eq(next_state[i], state[i].clone());
+        // ------------------------------------------------------------------
+        // 2. External round (split into is_first vs !is_first).
+        //    BabyBear uses SBOX_DEGREE=7: x^7 = x^3 * x^3 * x.
+        // ------------------------------------------------------------------
+        // 2a. Branch: external && is_first (absorbs initial linear layer)
+        {
+            let mut pre: [AB::Expr; WIDTH] = array::from_fn(|i| local_row.state_in[i].into());
+            external_linear_layer(&mut pre);
+            let add_rc: [AB::Expr; WIDTH] =
+                array::from_fn(|i| pre[i].clone() + prep_local.round_constants[i]);
+            let sbox: [AB::Expr; WIDTH] = array::from_fn(|i| {
+                let deg3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+                deg3.clone() * deg3.clone() * add_rc[i].clone()
+            });
+            let mut out = sbox;
+            external_linear_layer(&mut out);
+            let selector = is_real.clone() * is_external.clone() * is_first.clone();
+            for i in 0..WIDTH {
+                builder
+                    .when(selector.clone())
+                    .assert_eq(local_row.state_out[i].into(), out[i].clone());
+            }
         }
-    }
-
-    fn eval_internal_rounds<AB: DTRecursionAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local_row: &Poseidon2<AB::Var>,
-        next_row: &Poseidon2<AB::Var>,
-        round_constants: [AB::Var; WIDTH],
-        is_internal_row: AB::Var,
-    ) {
-        let local_state = local_row.state_var;
-
-        let s0 = local_row.internal_rounds_s0;
-        let mut state: [AB::Expr; WIDTH] = core::array::from_fn(|i| local_state[i].into());
-        for r in 0..NUM_INTERNAL_ROUNDS {
-            // Add the round constant.
-            let add_rc =
-                if r == 0 { state[0].clone() } else { s0[r - 1].into() } + round_constants[r];
-
-            let sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
-            let sbox_result = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
-
-            // Apply the linear layer.
-            // See `populate_internal_rounds` for why we don't have columns for the new state here.
-            state[0] = sbox_result.clone();
-            internal_linear_layer(&mut state);
-
-            if r < NUM_INTERNAL_ROUNDS - 1 {
-                builder.when(is_internal_row).assert_eq(s0[r], state[0].clone());
+        // 2b. Branch: external && !is_first
+        {
+            let add_rc: [AB::Expr; WIDTH] = array::from_fn(|i| {
+                local_row.state_in[i].into() + prep_local.round_constants[i]
+            });
+            let sbox: [AB::Expr; WIDTH] = array::from_fn(|i| {
+                let deg3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+                deg3.clone() * deg3.clone() * add_rc[i].clone()
+            });
+            let mut out = sbox;
+            external_linear_layer(&mut out);
+            let selector = is_real.clone() * is_external.clone() * not_first.clone();
+            for i in 0..WIDTH {
+                builder
+                    .when(selector.clone())
+                    .assert_eq(local_row.state_out[i].into(), out[i].clone());
             }
         }
 
-        let next_state = next_row.state_var;
-        for i in 0..WIDTH {
-            builder.when(is_internal_row).assert_eq(next_state[i], state[i].clone())
+        // ------------------------------------------------------------------
+        // 3. Internal round. Only state_in[0] goes through the S-box.
+        // ------------------------------------------------------------------
+        {
+            let mut state: [AB::Expr; WIDTH] = array::from_fn(|i| local_row.state_in[i].into());
+            let add_rc0 = state[0].clone() + prep_local.round_constants[0];
+            let deg3 = add_rc0.clone() * add_rc0.clone() * add_rc0.clone();
+            state[0] = deg3.clone() * deg3.clone() * add_rc0.clone();
+            internal_linear_layer(&mut state);
+            let selector = is_real.clone() * is_internal.clone();
+            for i in 0..WIDTH {
+                builder
+                    .when(selector.clone())
+                    .assert_eq(local_row.state_out[i].into(), state[i].clone());
+            }
         }
     }
 }

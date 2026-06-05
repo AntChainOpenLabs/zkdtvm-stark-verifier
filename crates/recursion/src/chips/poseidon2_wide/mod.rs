@@ -31,3 +31,4 @@ impl<'a, const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         }
     }
 }
+

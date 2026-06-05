@@ -114,9 +114,9 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "autocfg"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "backtrace"
@@ -168,9 +168,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.61"
+version = "1.2.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d"
+checksum = "556e016178bb5662a08681bbe0f00f8e17631781a4dfc8c45e466e4b185ec27f"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -308,17 +308,24 @@ name = "dt-basefold"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "dt-p3-baby-bear",
  "dt-p3-challenger",
  "dt-p3-commit",
+ "dt-p3-dft",
  "dt-p3-field",
  "dt-p3-fri",
  "dt-p3-matrix",
  "dt-p3-maybe-rayon",
  "dt-p3-merkle-tree",
+ "dt-p3-poseidon2",
+ "dt-p3-symmetric",
  "dt-p3-util",
  "itertools 0.13.0",
+ "num-traits",
+ "rand",
  "rayon",
  "serde",
+ "thiserror",
  "tracing",
 ]
 
@@ -332,9 +339,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-air"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76edd45be9c0fddd013cca751dc9a90247da380c72d37df15e34c68b18822db0"
+checksum = "9c98ccc0a35a85fd0a9903b83507b2a341311511c1d1f68fd505a73188900a9d"
 dependencies = [
  "dt-p3-field",
  "dt-p3-matrix",
@@ -342,9 +349,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-baby-bear"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec7d19408f915c0a0c0ba9e18710fd15e03a7b42e9e65a60656d796673e923f9"
+checksum = "7eb0f12c05036ce397b6cd436b6c388300d14bcbddd8e47ba81d53e578a3fdd9"
 dependencies = [
  "dt-p3-field",
  "dt-p3-mds",
@@ -357,9 +364,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-challenger"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5496f74449fdd91c79196e608932608bdd37f96bb7d13b4e76c4ebfe060e3082"
+checksum = "2211ebbb5b9de220ec64792ba0cda712f20c35abd37af09cfa0a80ee2e32e489"
 dependencies = [
  "dt-p3-field",
  "dt-p3-maybe-rayon",
@@ -371,9 +378,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-commit"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b9242a3ed7dce469bde8749da7e9eb68fa96c6967b9a8046ec27c423c3e225"
+checksum = "d403b6894021fce0be06c027f66a64fa479ade9489fc1a822d901039a567aab0"
 dependencies = [
  "dt-p3-challenger",
  "dt-p3-field",
@@ -385,9 +392,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-dft"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b099a7b2d98272ae6913d6eacf4fab31f8c303e6b5254705dd7f13fd4596cd90"
+checksum = "0e2b8829b52ce35029b6ac5c14ce8921184f9219d6490569218746121bce780f"
 dependencies = [
  "dt-p3-field",
  "dt-p3-matrix",
@@ -400,9 +407,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-field"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf0947227d31245af008ec3e1095b0d9cdd68ab95d02fa2fc48388d1247d670"
+checksum = "d48e922a2e002496c6c7fc75d804cddd4caed8a151ec5bc8e91b15ccb91d8aa3"
 dependencies = [
  "dt-p3-maybe-rayon",
  "dt-p3-util",
@@ -415,9 +422,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-fri"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3ee3fd90b4f6bc92ea62cf97a3271fbbc617e54d0bf4a55c9d48d5ac2e7c559"
+checksum = "e87c4aa00e0a15ceac6271ccdd627ae552b0c015ba9f7890d221ee3bfbc89405"
 dependencies = [
  "dt-p3-challenger",
  "dt-p3-commit",
@@ -434,9 +441,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-interpolation"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36bfdc9fa5e80fc2bd8e016c8d7502c0b96bfe7fa58f3434a46eb959eeac9534"
+checksum = "dc459992f4706119459d8e243229ba7d6e43ed59d1004f4661f926336d32f107"
 dependencies = [
  "dt-p3-field",
  "dt-p3-matrix",
@@ -445,9 +452,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-koala-bear"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66bf8c8fd4c5412489e949cad5bc8633fdd4681fe3d3204ba23fdbba99bb2780"
+checksum = "3554fbb9d17a459f5490251d663ea7daa03be067bc9d507b00c7a0ccf7a767da"
 dependencies = [
  "dt-p3-field",
  "dt-p3-mds",
@@ -460,9 +467,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-matrix"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9a2af926837b2fe0b3710841587274c8170cf5d6d5ce1e60a112e784721e66b"
+checksum = "c65a4f3dec4b844126e3c34df568c44ce3d3f28724976fecc1b2db0fd4c564bd"
 dependencies = [
  "dt-p3-field",
  "dt-p3-maybe-rayon",
@@ -475,18 +482,18 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-maybe-rayon"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c699ba3604013a85a81a5310e73d6aed01e0649e0b2dfa161d541a61dedfb329"
+checksum = "5d696d62f0eb801fb8139a79c733ceddb276369a5f820c49a6b78bdeab90fc58"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "dt-p3-mds"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98cd626b8ce4eae9686fc6e956c4a03f2628a37da6fb70a97d1025cedb87424d"
+checksum = "d77ea3f3741e3b0c183ef461dc40468f953b184dfef5f7b8e9a65d9791d4d97b"
 dependencies = [
  "dt-p3-dft",
  "dt-p3-field",
@@ -499,9 +506,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-merkle-tree"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21ab0e5f46e46ec1ba0feb9f20a41f49b7cb44920180981af3696878b945e44e"
+checksum = "40679bf6738f94b27f515c1e9b6f8837ad7eb3836d412048fe21ee2610a653e8"
 dependencies = [
  "dt-p3-commit",
  "dt-p3-field",
@@ -516,9 +523,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-poseidon2"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6bead1f2784cb4b928c23ae0790740f311c6c8a41298a93bc01cf98280419a0"
+checksum = "e72683d83112e24c8eb48a74ca0ac5f607735732cab8a5a96ac8759136e3f1d9"
 dependencies = [
  "dt-p3-field",
  "dt-p3-mds",
@@ -530,9 +537,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-symmetric"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3edea4fd22aaec2039a9e8aea9b83cbbd5a2644ed045c49ef393c4a493b087c1"
+checksum = "a5578facd1d98ce1b76d6bb0c4cb97e07f48cded6fa36d7741226ffbf867435c"
 dependencies = [
  "dt-p3-field",
  "itertools 0.12.1",
@@ -541,9 +548,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-uni-stark"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0989d0acafb6f48ec8b41511bd75328968da6b939a62bf82b3f530164f3607d"
+checksum = "7fb304709e040bd84b2f1ca8b019532f94029b895c3bc2137dced135a64bd92a"
 dependencies = [
  "dt-p3-air",
  "dt-p3-challenger",
@@ -560,9 +567,9 @@ dependencies = [
 
 [[package]]
 name = "dt-p3-util"
-version = "0.2.3-dt"
+version = "0.6.2-fix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2d1df645f01ba34b894c9bbf48f50773118079da1aba81ef8d5eab942e76fc6"
+checksum = "50111639a1b818445aab7982ab36833313bc84d544153e54c5a27b2f3e1eb7f3"
 dependencies = [
  "serde",
 ]
@@ -667,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "enum-map"
@@ -813,9 +820,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "log"
-version = "0.4.29"
+version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "matchers"
@@ -828,9 +835,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.8.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
 name = "miniz_oxide"
@@ -1071,9 +1078,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",
@@ -1104,9 +1111,9 @@ dependencies = [
 
 [[package]]
 name = "shlex"
-version = "1.3.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "smallvec"
@@ -1274,9 +1281,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.20.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
+checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "unicode-ident"
@@ -1436,18 +1443,18 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+checksum = "3b065d4f0e55f82fae73202e189638116a87c55ab6b8e6c2721e13dd9d854ad1"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+checksum = "0b631b19d36a892ab55420c92dbc83ccd79274f25be714855d3074aa71cab639"
 dependencies = [
  "proc-macro2",
  "quote",

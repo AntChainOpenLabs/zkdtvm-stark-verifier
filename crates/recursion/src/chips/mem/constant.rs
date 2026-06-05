@@ -143,3 +143,47 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use machine::tests::test_recursion_linear_program;
+
+    use super::*;
+
+    use crate::runtime::instruction as instr;
+
+    #[test]
+    pub fn prove_basic_mem() {
+        test_recursion_linear_program(vec![
+            instr::mem(MemAccessKind::Write, 1, 1, 2),
+            instr::mem(MemAccessKind::Read, 1, 1, 2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic]
+    pub fn basic_mem_bad_mult() {
+        test_recursion_linear_program(vec![
+            instr::mem(MemAccessKind::Write, 1, 1, 2),
+            instr::mem(MemAccessKind::Read, 9, 1, 2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic]
+    pub fn basic_mem_bad_address() {
+        test_recursion_linear_program(vec![
+            instr::mem(MemAccessKind::Write, 1, 1, 2),
+            instr::mem(MemAccessKind::Read, 1, 9, 2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic]
+    pub fn basic_mem_bad_value() {
+        test_recursion_linear_program(vec![
+            instr::mem(MemAccessKind::Write, 1, 1, 2),
+            instr::mem(MemAccessKind::Read, 1, 1, 999),
+        ]);
+    }
+}

@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use zkdtvm_stark_verifier::{verify_compressed, DTReduceProof, DTVerifyingKey, HashableKey, InnerSC};
+use zkdtvm_stark_verifier::{verify_compressed_bytes, DTVerifyingKey, HashableKey, DIGEST_SIZE};
 
 fn project_root() -> PathBuf {
     // crates/verify -> ../.. = project root
@@ -21,14 +21,23 @@ fn has_fixtures() -> bool {
     root.join("proof.bin").exists() && root.join("vk.bin").exists()
 }
 
-fn load_proof() -> DTReduceProof<InnerSC> {
-    let bytes = std::fs::read(project_root().join("proof.bin")).unwrap();
-    bincode::deserialize(&bytes).unwrap()
+fn load_proof_bytes() -> Vec<u8> {
+    std::fs::read(project_root().join("proof.bin")).unwrap()
 }
 
-fn load_vk() -> DTVerifyingKey {
-    let bytes = std::fs::read(project_root().join("vk.bin")).unwrap();
-    bincode::deserialize(&bytes).unwrap()
+fn load_vk_bytes() -> Vec<u8> {
+    std::fs::read(project_root().join("vk.bin")).unwrap()
+}
+
+fn load_vk_digest_u32() -> [u32; DIGEST_SIZE] {
+    let bytes = load_vk_bytes();
+    match bincode::deserialize::<[u32; DIGEST_SIZE]>(&bytes) {
+        Ok(digest) => digest,
+        Err(_) => {
+            let vk: DTVerifyingKey = bincode::deserialize(&bytes).unwrap();
+            vk.hash_u32()
+        }
+    }
 }
 
 #[test]
@@ -42,11 +51,12 @@ fn e2e_verify_compressed_proof() {
         return;
     }
 
-    let proof = load_proof();
-    let vk = load_vk();
-
-    let result = verify_compressed(&proof, &vk);
-    assert!(result.is_ok(), "E2E verification failed: {:?}", result.err());
+    let result = verify_compressed_bytes(&load_proof_bytes(), &load_vk_bytes());
+    assert!(
+        result.is_ok(),
+        "E2E verification failed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -55,9 +65,8 @@ fn e2e_vk_hash_deterministic() {
         return;
     }
 
-    let vk = load_vk();
-    let h1 = vk.hash_babybear();
-    let h2 = vk.hash_babybear();
+    let h1 = load_vk_digest_u32();
+    let h2 = load_vk_digest_u32();
     assert_eq!(h1, h2, "VK hash should be deterministic across calls");
 }
 

@@ -149,3 +149,67 @@ pub fn compute_dotproduct_mix<F: Field, EF: ExtensionField<F>>(a: &[EF], b: &[F]
 pub fn is_power_of_two(num: usize) -> bool {
     num != 0 && num != 1 && (num & (num - 1)) == 0
 }
+
+#[cfg(test)]
+mod tests {
+    use p3_baby_bear::BabyBear;
+    use p3_field::AbstractField;
+
+    use super::*;
+
+    type F = BabyBear;
+
+    #[test]
+    fn test_pow2() {
+        assert_eq!(0usize.pow2(), 1);
+        assert_eq!(1usize.pow2(), 2);
+        assert_eq!(10usize.pow2(), 1024);
+    }
+
+    #[test]
+    fn test_log_2() {
+        assert_eq!(1usize.log_2(), 0);
+        assert_eq!(2usize.log_2(), 1);
+        assert_eq!(1024usize.log_2(), 10);
+    }
+
+    #[test]
+    fn test_gaussian_elimination_2x2() {
+        // System: 2x + y = 5, x + 3y = 10
+        // Solution: x = 1, y = 3
+        let two = F::from_canonical_u64(2);
+        let three = F::from_canonical_u64(3);
+        let five = F::from_canonical_u64(5);
+        let ten = F::from_canonical_u64(10);
+
+        let mut matrix = vec![
+            vec![two, F::one(), five],
+            vec![F::one(), three, ten],
+        ];
+
+        let result = gaussian_elimination(&mut matrix);
+        assert_eq!(result[0], F::one());
+        assert_eq!(result[1], three);
+    }
+
+    #[test]
+    fn test_gaussian_elimination_3x3() {
+        // System: x + 2y + 3z = 14, 2x + 5y + 3z = 21, 3x + y + 2z = 11
+        // Solution: x = 1, y = 2, z = 3
+        let one = F::one();
+        let two = F::from_canonical_u64(2);
+        let three = F::from_canonical_u64(3);
+        let five = F::from_canonical_u64(5);
+
+        let mut matrix = vec![
+            vec![one, two, three, F::from_canonical_u64(14)],
+            vec![two, five, three, F::from_canonical_u64(21)],
+            vec![three, one, two, F::from_canonical_u64(11)],
+        ];
+
+        let result = gaussian_elimination(&mut matrix);
+        assert_eq!(result[0], one);
+        assert_eq!(result[1], two);
+        assert_eq!(result[2], three);
+    }
+}

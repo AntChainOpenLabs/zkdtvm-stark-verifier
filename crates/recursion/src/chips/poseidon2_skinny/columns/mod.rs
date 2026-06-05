@@ -1,26 +1,27 @@
-use std::mem::{size_of, transmute};
+use std::mem::size_of;
 
-use crate::utils::indices_arr;
 use dt_derive::AlignedBorrow;
 
-use crate::chips::poseidon2_skinny::{NUM_INTERNAL_ROUNDS, WIDTH};
+use crate::chips::poseidon2_skinny::WIDTH;
 
 pub mod preprocessed;
 
+/// Number of cells in one main-trace row of the skinny BabyBear Poseidon2 chip.
+///
+/// Layout: `state_in[16] | state_out[16]` -> 32 cells.
 pub const NUM_POSEIDON2_COLS: usize = size_of::<Poseidon2<u8>>();
-const fn make_col_map_degree9() -> Poseidon2<usize> {
-    let indices_arr = indices_arr::<NUM_POSEIDON2_COLS>();
-    unsafe { transmute::<[usize; NUM_POSEIDON2_COLS], Poseidon2<usize>>(indices_arr) }
-}
-pub const POSEIDON2_DEGREE9_COL_MAP: Poseidon2<usize> = make_col_map_degree9();
 
-/// cbindgen:ignore
-pub const NUM_INTERNAL_ROUNDS_S0: usize = NUM_INTERNAL_ROUNDS - 1;
-
-/// Struct for the poseidon2 skinny non preprocessed column.
+/// Main-trace columns (one round per row).
+///
+/// Each row holds the round's input state and the round's output state. Cross-row state
+/// transitions are not constrained directly (the constraint system is single-row only);
+/// instead, consecutive rounds are chained through memory lookups carried in the
+/// preprocessed trace.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct Poseidon2<T: Copy> {
-    pub state_var: [T; WIDTH],
-    pub internal_rounds_s0: [T; NUM_INTERNAL_ROUNDS_S0],
+    /// Input state of this round.
+    pub state_in: [T; WIDTH],
+    /// Output state of this round.
+    pub state_out: [T; WIDTH],
 }

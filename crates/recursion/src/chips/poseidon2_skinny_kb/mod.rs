@@ -19,9 +19,37 @@ pub const NUM_INTERNAL_ROUNDS: usize = 20;
 /// cbindgen:ignore
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
+/// Half of the external rounds (first half = 4, second half = 4).
+pub const HALF_EXTERNAL_ROUNDS: usize = NUM_EXTERNAL_ROUNDS / 2;
+
+/// Rows produced per permutation in the KoalaBear skinny chip's "5-row" layout:
+///   - rows 0..1: first half of external rounds (2 rounds per row, folding)
+///   - row 2: ALL `NUM_INTERNAL_ROUNDS` (= 20) internal rounds folded into one row
+///   - rows 3..4: second half of external rounds (2 rounds per row, folding)
+pub const EXTERNAL_ROWS_PER_HALF: usize = 2;
+pub const EXTERNAL_ROUNDS_PER_ROW: usize = HALF_EXTERNAL_ROUNDS / EXTERNAL_ROWS_PER_HALF;
+/// cbindgen:ignore
+pub const ROWS_PER_PERMUTE: usize = EXTERNAL_ROWS_PER_HALF * 2 + 1; // 5
+
+/// Index of the single "internal-rounds" row inside a 5-row permutation block.
+/// cbindgen:ignore
+pub const INTERNAL_ROW_IDX: usize = EXTERNAL_ROWS_PER_HALF; // 2
+
+/// Number of cross-row scratch address groups carried by `Poseidon2SkinnyInstr` for the
+/// KoalaBear path. Equals `ROWS_PER_PERMUTE - 1 = 4` (one group between each pair of
+/// adjacent rows of a permutation block).
+/// cbindgen:ignore
+pub const SKINNY_NUM_SCRATCH_KB: usize = ROWS_PER_PERMUTE - 1; // 4
+
 /// KoalaBear variant of the Poseidon2 skinny chip. Uses SBOX_DEGREE=3 (x^3) instead of
 /// BabyBear's SBOX_DEGREE=7, which means no intermediate temp columns are needed to reduce
 /// the constraint degree.
+///
+/// Layout: 9 rows per permutation. The 4 + 4 external rounds occupy one row each; all
+/// 20 internal rounds are folded into a single "internal" row whose state-update chain is
+/// closed within a single AIR row using the per-internal-round `internal_rounds_s0[k]`
+/// witness columns. This keeps constraint degree at 3 while shrinking the row count from
+/// 28 (one-round-per-row) to 9.
 pub struct Poseidon2SkinnyKbChip<const DEGREE: usize>(PhantomData<()>);
 
 impl<const DEGREE: usize> Default for Poseidon2SkinnyKbChip<DEGREE> {

@@ -1,16 +1,16 @@
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/AntChainOpenLabs/zkdtvm-stark-verifier"
 keywords = ["zkvm", "verifier", "zero-knowledge"]
 categories = ["cryptography"]
 
 [workspace]
 members = [
+    "crates/basefold",
     "crates/derive",
     "crates/primitives",
-    "crates/basefold",
     "crates/stark",
     "crates/recursion",
     "crates/verify",
@@ -35,25 +35,25 @@ zkdtvm-stark-verifier = { path = "crates/verify" }
 dt-derive = { path = "crates/derive" }
 dt-primitives = { path = "crates/primitives" }
 dt-stark = { path = "crates/stark" }
-dt-basefold = { path = "crates/basefold" }
+dt-basefold = { path = "crates/basefold", features = ["basefold"] }
 dt-recursion = { path = "crates/recursion" }
 
-# --- Plonky3 (dt fork, published on crates.io) ---
-p3-field = { package = "dt-p3-field", version = "0.2.3-dt" }
-p3-air = { package = "dt-p3-air", version = "0.2.3-dt" }
-p3-baby-bear = { package = "dt-p3-baby-bear", version = "0.2.3-dt", features = ["nightly-features"] }
-p3-koala-bear = { package = "dt-p3-koala-bear", version = "0.2.3-dt" }
-p3-poseidon2 = { package = "dt-p3-poseidon2", version = "0.2.3-dt" }
-p3-symmetric = { package = "dt-p3-symmetric", version = "0.2.3-dt" }
-p3-matrix = { package = "dt-p3-matrix", version = "0.2.3-dt" }
-p3-merkle-tree = { package = "dt-p3-merkle-tree", version = "0.2.3-dt" }
-p3-commit = { package = "dt-p3-commit", version = "0.2.3-dt" }
-p3-fri = { package = "dt-p3-fri", version = "0.2.3-dt" }
-p3-challenger = { package = "dt-p3-challenger", version = "0.2.3-dt" }
-p3-util = { package = "dt-p3-util", version = "0.2.3-dt" }
-p3-dft = { package = "dt-p3-dft", version = "0.2.3-dt" }
-p3-uni-stark = { package = "dt-p3-uni-stark", version = "0.2.3-dt" }
-p3-maybe-rayon = { package = "dt-p3-maybe-rayon", version = "0.2.3-dt", features = ["parallel"] }
+# --- Plonky3 (dt-compatible fork, published on crates.io) ---
+p3-field = { package = "dt-p3-field", version = "=0.6.2-fix.1" }
+p3-air = { package = "dt-p3-air", version = "=0.6.2-fix.1" }
+p3-baby-bear = { package = "dt-p3-baby-bear", version = "=0.6.2-fix.1", features = ["nightly-features"] }
+p3-koala-bear = { package = "dt-p3-koala-bear", version = "=0.6.2-fix.1" }
+p3-poseidon2 = { package = "dt-p3-poseidon2", version = "=0.6.2-fix.1" }
+p3-symmetric = { package = "dt-p3-symmetric", version = "=0.6.2-fix.1" }
+p3-matrix = { package = "dt-p3-matrix", version = "=0.6.2-fix.1" }
+p3-merkle-tree = { package = "dt-p3-merkle-tree", version = "=0.6.2-fix.1" }
+p3-commit = { package = "dt-p3-commit", version = "=0.6.2-fix.1" }
+p3-fri = { package = "dt-p3-fri", version = "=0.6.2-fix.1" }
+p3-challenger = { package = "dt-p3-challenger", version = "=0.6.2-fix.1" }
+p3-util = { package = "dt-p3-util", version = "=0.6.2-fix.1" }
+p3-dft = { package = "dt-p3-dft", version = "=0.6.2-fix.1" }
+p3-uni-stark = { package = "dt-p3-uni-stark", version = "=0.6.2-fix.1" }
+p3-maybe-rayon = { package = "dt-p3-maybe-rayon", version = "=0.6.2-fix.1", features = ["parallel"] }
 
 # --- third-party ---
 bincode = "1.3.3"

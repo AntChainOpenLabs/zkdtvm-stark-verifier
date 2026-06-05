@@ -1,7 +1,9 @@
 use super::{dt_dev_mode, poseidon2::bn254_poseidon2_rc3};
 use dt_primitives::SCField;
-use dt_stark::sumcheck::config::{MlCom, SCStarkGenericConfig};
-use dt_stark::{Com, StarkGenericConfig, ZeroCommitment};
+use dt_stark::{
+    sumcheck::config::{MlCom, SCStarkGenericConfig},
+    Com, StarkGenericConfig, ZeroCommitment,
+};
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::{Bn254Fr, DiffusionMatrixBN254};
 use p3_challenger::MultiField32Challenger;
@@ -15,8 +17,7 @@ use p3_fri::{
 use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
-use basefold::basefold::basefold_pcs::BaseFoldPcs;
-use basefold::basefold::mlpcs::MlPCS;
+use pcs::basefold::{basefold_pcs::BaseFoldPcs, mlpcs::MlPCS};
 use serde::{Deserialize, Serialize};
 
 pub const DIGEST_SIZE: usize = 1;
@@ -52,9 +53,13 @@ pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
 pub type OuterPcsProof =
     TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;
-use basefold::basefold::basefold_pcs::BasefoldProof;
-pub type OuterBasefoldProof =
-    BasefoldProof<OuterChallenge, OuterChallengeMmcs, OuterVal, Vec<Vec<OuterBatchOpening>>>;
+use pcs::basefold::basefold_pcs::{BasefoldInputProof, BasefoldProof};
+pub type OuterBasefoldProof = BasefoldProof<
+    OuterChallenge,
+    OuterChallengeMmcs,
+    OuterVal,
+    BasefoldInputProof<OuterVal, OuterValMmcs>,
+>;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {
@@ -95,6 +100,7 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
         num_queries,
         grinding_bits_query: 16,
         grinding_bits_batching: 16,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -125,6 +131,7 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
         num_queries,
         grinding_bits_query: pow_bits,
         grinding_bits_batching: batching_bits,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -220,6 +227,7 @@ pub fn test_fri_config() -> FriConfig<OuterChallengeMmcs> {
         num_queries: 1,
         grinding_bits_query: 1,
         grinding_bits_batching: 1,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -341,7 +349,7 @@ pub type SCOuterBasefoldProof = BasefoldProof<
     SCOuterChallenge,
     SCOuterChallengeMmcs,
     SCOuterVal,
-    Vec<Vec<SCOuterBatchOpening>>,
+    BasefoldInputProof<SCOuterVal, SCOuterValMmcs>,
 >;
 pub type SCOuterChallengeMmcs = ExtensionMmcs<SCOuterVal, SCOuterChallenge, SCOuterValMmcs>;
 pub type SCOuterPcs = TwoAdicFriPcs<SCOuterVal, OuterDft, SCOuterValMmcs, SCOuterChallengeMmcs>;
@@ -379,6 +387,7 @@ fn sc_outer_fri_config() -> FriConfig<SCOuterChallengeMmcs> {
         num_queries,
         grinding_bits_query: 16,
         grinding_bits_batching: 16,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }
@@ -408,6 +417,7 @@ fn sc_outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<SCOuterChalle
         num_queries,
         grinding_bits_query: pow_bits,
         grinding_bits_batching: batching_bits,
+        log_final_poly_len: 5,
         mmcs: challenge_mmcs,
     }
 }

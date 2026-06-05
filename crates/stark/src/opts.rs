@@ -16,7 +16,7 @@ pub const SHARD_HEIGHT_THRESHOLD: u64 = 1 << 22;
 ///
 /// Basefold PCS has effective blowup factor 1 (vs FRI's 2), so we can use 1<<29 instead of
 /// SP1's (1<<28)+(1<<27) while keeping the same memory footprint.
-pub const SHARD_CELLS_THRESHOLD: u64 = (1u64 << 29) * 2;
+pub const SHARD_CELLS_THRESHOLD: u64 = 1 << 29;
 
 /// A smaller total cells threshold for memory-constrained environments.
 pub const SHARD_CELLS_THRESHOLD_SMALL: u64 = (1 << 28) + (1 << 27);
@@ -283,5 +283,45 @@ impl SplitOpts {
             sha_compress: 32 * deferred_split_threshold / 64,
             memory: 64 * deferred_split_threshold,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::print_stdout)]
+
+    use super::*;
+
+    #[test]
+    fn test_opts() {
+        let opts = DTProverOpts::cpu(8);
+        println!("8: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(15);
+        println!("15: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(16);
+        println!("16: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(32);
+        println!("32: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(36);
+        println!("36: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(64);
+        println!("64: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(128);
+        println!("128: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(256);
+        println!("256: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::cpu(512);
+        println!("512: {:?}", opts.core_opts);
+
+        let opts = DTProverOpts::auto();
+        println!("auto: {:?}", opts.core_opts);
     }
 }
