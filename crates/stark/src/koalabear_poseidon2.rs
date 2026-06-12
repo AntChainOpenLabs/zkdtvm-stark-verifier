@@ -410,7 +410,15 @@ pub mod koala_bear_poseidon2 {
             let fri_config1 = shrink_fri_config();
 
             let pcs = Pcs::new(27, dft, val_mmcs.clone(), fri_config);
-            let mlpcs = Mlpcs::new(val_mmcs, fri_config1);
+            let enable_cross_round = std::env::var("DT_USE_CROSS_ROUND_SHRINK")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            let mut mlpcs = Mlpcs::new(val_mmcs, fri_config1);
+            mlpcs.use_cross_round = enable_cross_round;
+            assert!(
+                !(mlpcs.use_cross_round && mlpcs.use_path_pruning),
+                "cross-round and path-pruning are mutually exclusive on the shrink PCS"
+            );
             Self { pcs, mlpcs, perm, config_type: KoalaBearPoseidon2Type::Shrink }
         }
 
@@ -425,15 +433,14 @@ pub mod koala_bear_poseidon2 {
             let fri_config1 = root_shrink_fri_config();
 
             let pcs = Pcs::new(27, dft, val_mmcs.clone(), fri_config);
-            // Enable path-pruning on the root_shrink PCS. This produces
-            // BFS-merged Merkle proofs that significantly reduce proof size
-            // in the final compress layers (penultimate + root). Earlier layers
-            // keep use_path_pruning=false so their programs remain cacheable.
-            let enable_pruning = std::env::var("DT_USE_PATH_PRUNING")
+            let enable_cross_round = std::env::var("DT_USE_CROSS_ROUND_ROOT")
                 .map(|v| v == "1")
-                .unwrap_or(true); // default ON for root_shrink
+                .unwrap_or(false);
+            let enable_pruning =
+                std::env::var("DT_USE_PATH_PRUNING").map(|v| v == "1").unwrap_or(true);
             let mut mlpcs = Mlpcs::new(val_mmcs, fri_config1);
             mlpcs.use_path_pruning = enable_pruning;
+            mlpcs.use_cross_round = enable_cross_round;
             Self { pcs, mlpcs, perm, config_type: KoalaBearPoseidon2Type::RootShrink }
         }
 

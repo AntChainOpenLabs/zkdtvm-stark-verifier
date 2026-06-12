@@ -32,6 +32,10 @@ serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+rand_core = { version = "0.6", default-features = false }
+rand_xoshiro = "0.6"
+
 [features]
 default = []
 basefold = []

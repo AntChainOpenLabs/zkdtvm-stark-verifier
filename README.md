@@ -60,7 +60,8 @@ zkdtvm-stark-verifier --proof proof.bin --vk vk.bin --message message.bin
 ./target/release/zkdtvm-stark-verifier --proof proof.bin --vk vk.bin --message message.bin
 ```
 
-The CLI expects bincode-serialized `DTReduceProof<InnerSC>` and `DTVerifyingKey` files.
+The CLI expects a bincode-serialized `DTReduceProof<InnerSC>` proof. The verifying key file may
+be either a bincode-serialized `DTVerifyingKey` or a 32-byte bincode-serialized `[u32; 8]` digest.
 
 ## Test
 
@@ -75,8 +76,8 @@ Three pre-generated binary fixtures are included in the project root:
 
 | File          | Description                                                  |
 | ------------- | ------------------------------------------------------------ |
-| `proof.bin`   | Compressed proof (path-pruning enabled, root_shrink machine) |
-| `vk.bin`      | Verifying key                                                |
+| `proof.bin`   | Compressed proof fixture generated from SP1 v0.6.3-compatible verifier settings |
+| `vk.bin`      | Verifying key digest (`[u32; 8]`)                            |
 | `message.bin` | Optional message payload                                     |
 
 ## Design Decisions
