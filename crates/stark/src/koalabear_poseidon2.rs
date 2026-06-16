@@ -327,7 +327,7 @@ pub mod koala_bear_poseidon2 {
             num_queries,
             grinding_bits_query: 20,
             grinding_bits_batching: 10,
-            log_final_poly_len: super::log_final_poly_len_from_env(4),
+            log_final_poly_len: super::log_final_poly_len_from_env(0),
             mmcs: challenge_mmcs,
         }
     }
@@ -435,7 +435,7 @@ pub mod koala_bear_poseidon2 {
             let pcs = Pcs::new(27, dft, val_mmcs.clone(), fri_config);
             let enable_cross_round = std::env::var("DT_USE_CROSS_ROUND_ROOT")
                 .map(|v| v == "1")
-                .unwrap_or(false);
+                .unwrap_or(true);
             let enable_pruning =
                 std::env::var("DT_USE_PATH_PRUNING").map(|v| v == "1").unwrap_or(true);
             let mut mlpcs = Mlpcs::new(val_mmcs, fri_config1);
