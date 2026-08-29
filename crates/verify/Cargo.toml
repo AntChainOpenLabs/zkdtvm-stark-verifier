@@ -10,39 +10,18 @@ name = "zkdtvm_stark_verifier"
 path = "src/lib.rs"
 
 [dependencies]
+dt-core-executor = { workspace = true }
+dt-core-machine = { workspace = true }
 dt-stark = { workspace = true }
 dt-primitives = { workspace = true }
-dt-recursion = { workspace = true }
-dt-basefold = { workspace = true }
+dt-prover = { workspace = true }
+dt-recursion-core = { workspace = true }
 
 p3-field = { workspace = true }
-p3-air = { workspace = true }
-p3-baby-bear = { workspace = true }
-p3-koala-bear = { workspace = true }
-p3-challenger = { workspace = true }
-p3-commit = { workspace = true }
-p3-fri = { workspace = true }
-p3-matrix = { workspace = true }
-p3-merkle-tree = { workspace = true }
-p3-poseidon2 = { workspace = true }
-p3-symmetric = { workspace = true }
-p3-dft = { workspace = true }
-p3-uni-stark = { workspace = true }
 
 serde = { workspace = true }
 bincode = { workspace = true }
-itertools = { workspace = true }
 tracing = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-hashbrown = { workspace = true }
-blake3 = { workspace = true }
-sha2 = { workspace = true }
 
 [features]
-default = ["koalabear"]
-koalabear = [
-    "dt-stark/koalabear",
-    "dt-primitives/koalabear",
-    "dt-recursion/koalabear",
-]
+default = []

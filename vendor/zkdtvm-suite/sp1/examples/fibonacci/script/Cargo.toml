@@ -1,0 +1,58 @@
+[package]
+name = "fibonacci-script"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "fibonacci-script"
+publish = false
+
+[dependencies]
+anyhow = "1.0.83"
+bincode = "1.3.3"
+hex = "0.4.3"
+sha2 = "0.10.8"
+serde_json = { workspace = true }
+dt-core-machine = { workspace = true, default-features = false }
+dt-prover = { workspace = true, default-features = false }
+dt-sdk = { workspace = true, default-features = false }
+dt-stark = { path = "../../../crates/stark", default-features = false }
+p3-field = { workspace = true }
+
+[build-dependencies]
+dt-build = { workspace = true, default-features = false }
+
+[[bin]]
+name = "plonk_bn254"
+path = "bin/plonk_bn254.rs"
+
+[[bin]]
+name = "groth16_bn254"
+path = "bin/groth16_bn254.rs"
+
+[[bin]]
+name = "compressed"
+path = "bin/compressed.rs"
+
+[[bin]]
+name = "algebraic_decomp_compressed"
+path = "bin/algebraic_decomp_compressed.rs"
+
+[[bin]]
+name = "execute"
+path = "bin/execute.rs"
+
+[[bin]]
+name = "export_verifier_fixture"
+path = "bin/export_verifier_fixture.rs"
+
+[features]
+default = ["koalabear_whir_ext5", "native-recursion"]
+# The native ladder as the default `.compressed()` backend. Needed explicitly
+# because this crate takes dt-sdk with default-features = false.
+native-recursion = ["dt-sdk/native-recursion"]
+network = ["dt-sdk/network"]
+koalabear = ["dt-sdk/koalabear", "dt-build/koalabear", "dt-stark/koalabear"]
+babybear = ["dt-sdk/babybear", "dt-build/babybear", "dt-stark/babybear"]
+ext5 = ["dt-sdk/ext5", "dt-build/ext5", "dt-stark/ext5"]
+koalabear_whir = ["network", "koalabear"]
+babybear_whir = ["network", "babybear"]
+koalabear_whir_ext5 = ["network", "koalabear", "ext5"]

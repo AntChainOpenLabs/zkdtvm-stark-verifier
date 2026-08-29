@@ -1,0 +1,58 @@
+# Cargo / Rust: build output (all `target` dirs — workspace root and nested crates)
+target/
+**/target/
+debug/
+
+# Cargo config
+.cargo
+
+# rustfmt backups
+**/*.rs.bk
+
+# MSVC linker debug symbols (Windows)
+*.pdb
+
+# Coverage (llvm-cov / grcov)
+*.profraw
+*.profdata
+lcov.info
+coverage/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Proofs
+**/proof-with-*.bin
+**/program.bin
+**/stdin.bin
+**/node_modules
+
+# Local agent working copies (skills SoT: antora-skills/skills/)
+.agents/
+
+# Local IDE / agent / index (not shared project config)
+.cursor/
+.claude/
+.aone-copilot/
+.gitnexus/
+.vscode/
+.idea/
+
+# Editor swap files
+*.swp
+*~
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# If you use mold/sccache caches colocated with the repo (uncommon)
+# .sccache/
+.aone_copilot
+/docs/
+.agentx/

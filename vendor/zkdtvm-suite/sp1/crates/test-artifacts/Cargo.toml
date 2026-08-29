@@ -1,0 +1,25 @@
+[package]
+name = "test-artifacts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+# NOTE: 不要硬编码 dt-build 的 field feature（如 "koalabear"）。
+# 本 crate 被多个上层 crate 通过 dev-dependencies 引用，硬编码会经由 feature unification
+# 把 koalabear 注入整张依赖图，与上游传入的 babybear 合并后击穿 dt-primitives 的互斥保护。
+# 这里不启用任何额外 feature；field 选择由顶层 crate（命令行 / dt-sdk 等）决定。
+dt-build = { workspace = true, default-features = false }
+
+[features]
+default = []
+koalabear = ["dt-build/koalabear"]
+babybear = ["dt-build/babybear"]
+ext5 = ["dt-build/ext5"]
+
+[build-dependencies]
+dt-build = { workspace = true, default-features = false }

@@ -1,0 +1,18 @@
+[package]
+name = "fibonacci-program"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Match host prover field when `aggregation-script` builds with `--features babybear*` (build.rs).
+dt-zkvm = { path = "../../../crates/zkvm/entrypoint", default-features = false, features = [
+    "libm",
+    "lib",
+    "embedded",
+] }
+
+[features]
+default = ["guest_koalabear"]
+guest_koalabear = ["dt-zkvm/koalabear"]
+guest_babybear = ["dt-zkvm/babybear"]

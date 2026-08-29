@@ -1,0 +1,88 @@
+[package]
+name = "dt-recursion-circuit"
+description = "SP1 is a performant, 100% open-source, contributor-friendly zkVM."
+readme = "../../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-air = { workspace = true }
+p3-field = { workspace = true }
+p3-commit = { workspace = true }
+p3-fri = { workspace = true }
+p3-matrix = { workspace = true }
+p3-util = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-challenger = { workspace = true }
+p3-dft = { workspace = true }
+p3-bn254-fr = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-koala-bear = { workspace = true }
+p3-uni-stark = { workspace = true }
+p3-maybe-rayon = {workspace = true}
+p3-merkle-tree = { workspace = true }
+
+dt-core-machine = { workspace = true, default-features = false }
+dt-core-executor = { workspace = true, default-features = false }
+dt-stark = { workspace = true, default-features = false }
+dt-derive = { workspace = true }
+dt-recursion-core = { workspace = true, default-features = false }
+dt-recursion-compiler = { workspace = true, default-features = false }
+dt-primitives = { workspace = true, default-features = false }
+dt-recursion-gnark-ffi = { workspace = true, default-features = false }
+
+itertools = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+rand = "0.8.5"
+tracing = { workspace = true }
+hashbrown = { workspace = true, features = ["serde", "inline-more"] }
+num-traits = "0.2.19"
+rayon = "1.10.0"
+log = { workspace = true }
+env_logger = "0.11"
+pcs = { workspace = true}
+polyair = { workspace = true, default-features = false }
+indexmap = "1.9.3"
+bincode = "1.3.3"
+rand_core = "0.6.4"
+tracing-subscriber = { version = "0.3.19", features = ["std", "env-filter"]}
+rand_xoshiro = "0.6.0"
+tracing-forest = "0.1.6"
+
+[dev-dependencies]
+# NOTE: 这里只为 dt-recursion-core 追加 dev 才需要的 `program_validation` feature。
+# 不要重复声明 dt-core-executor / dt-recursion-core 的 path 与 default-features，
+# 否则 Cargo 会把 dev-dep 与 [dependencies] 中的 feature 选择合并时"重置"成默认空集，
+# 导致命令行上传入的 `babybear` 无法穿透到这两个 crate，进而出现
+# `cfg(feature = "babybear")` 整段被 cfg 掉、`CoreSC` 找不到 等编译错误。
+dt-recursion-core = { workspace = true, default-features = false, features = ["program_validation"] }
+ff = { version = "0.13", features = ["derive", "derive_bits"] }
+p3-challenger = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-dft = { workspace = true }
+p3-poseidon2 = { workspace = true }
+zkhash = "0.2.0"
+rand = "0.8.5"
+test-artifacts = { path = "../../test-artifacts" }
+
+[features]
+default = []
+verify = ["dt-recursion-compiler/verify"]
+# NOTE: 这里同时把 field feature 传给 test-artifacts（dev-dep）。
+# 否则 test-artifacts -> dt-build -> dt-prover -> dt-core-executor 这条 dev-dep 链上
+# 没有任何节点启用 field feature，Cargo 在做 dev-deps 的 feature unification 时
+# 会让 dt-core-executor 的 dev-dep 副本处于 "no field" 状态，导致
+# `cfg(feature = "babybear")` 整段被 cfg 掉、`CoreSC` 找不到 等编译错误。
+koalabear = ["dt-primitives/koalabear", "dt-stark/koalabear", "dt-recursion-compiler/koalabear", "dt-core-machine/koalabear", "dt-core-executor/koalabear", "dt-recursion-core/koalabear", "dt-recursion-gnark-ffi/koalabear", "polyair/koalabear", "test-artifacts/koalabear"]
+babybear = ["dt-primitives/babybear", "dt-stark/babybear", "dt-recursion-compiler/babybear", "dt-core-machine/babybear", "dt-core-executor/babybear", "dt-recursion-core/babybear", "dt-recursion-gnark-ffi/babybear", "polyair/babybear", "test-artifacts/babybear"]
+ext5 = ["dt-primitives/ext5", "dt-stark/ext5", "dt-recursion-compiler/ext5", "dt-recursion-core/ext5", "polyair/ext5"]
+native-gnark = ["dt-recursion-gnark-ffi/native"]
+debug = ["dt-core-machine/debug", "dt-recursion-compiler/debug"]
+
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "all-instructions-test"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+dt-zkvm = { path = "../../../../crates/zkvm/entrypoint" }

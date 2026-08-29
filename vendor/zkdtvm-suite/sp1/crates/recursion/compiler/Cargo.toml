@@ -1,0 +1,51 @@
+[package]
+name = "dt-recursion-compiler"
+description = "SP1 is a performant, 100% open-source, contributor-friendly zkVM."
+readme = "../../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-bn254-fr = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-field = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-util = { workspace = true }
+
+log = {workspace = true}
+
+dt-core-machine = { workspace = true, default-features = false }
+dt-primitives = { workspace = true }
+dt-recursion-core = { workspace = true }
+dt-recursion-derive = { workspace = true }
+dt-stark = { workspace = true, default-features = false }
+
+
+itertools = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+backtrace = { version = "0.3.71", optional = true }
+tracing = { workspace = true }
+vec_map = "0.8.2"
+num-bigint = "0.4.6"
+
+[dev-dependencies]
+dt-recursion-core = { path = "../core", features = ["program_validation"] }
+p3-challenger = { workspace = true }
+p3-dft = { workspace = true }
+p3-merkle-tree = { workspace = true }
+rand = "0.8.5"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+
+[features]
+default = []
+koalabear = ["dt-primitives/koalabear", "dt-stark/koalabear", "dt-recursion-core/koalabear"]
+babybear = ["dt-primitives/babybear", "dt-stark/babybear", "dt-recursion-core/babybear"]
+ext5 = ["dt-primitives/ext5", "dt-stark/ext5", "dt-recursion-core/ext5"]
+debug = ["dt-recursion-core/debug", "dep:backtrace"]
+verify = []
+[lints]
+workspace = true

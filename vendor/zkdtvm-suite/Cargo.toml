@@ -1,0 +1,145 @@
+[workspace]
+resolver = "2"
+members = [
+    # === WHIR PCS ===
+    "WHIR-pcs/pcs",
+
+    # === sp1 ===
+    "sp1/crates/build",
+    "sp1/crates/cli",
+    "sp1/crates/core/executor",
+    "sp1/crates/core/machine",
+    "sp1/crates/core/test-elf",
+    "sp1/crates/curves",
+    "sp1/crates/derive",
+    "sp1/crates/helper",
+    "sp1/crates/native-recursion",
+    "sp1/crates/sc_prover",
+    "sp1/crates/polyair",
+    "sp1/crates/recursion/circuit",
+    "sp1/crates/recursion/compiler",
+    "sp1/crates/recursion/core",
+    "sp1/crates/recursion/derive",
+    "sp1/crates/recursion/gnark-cli",
+    "sp1/crates/recursion/gnark-ffi",
+    "sp1/crates/sdk_sc",
+    "sp1/crates/verifier",
+    "sp1/crates/stark",
+    "sp1/crates/primitives",
+    "sp1/crates/zkvm/*",
+    "sp1/crates/test-artifacts",
+]
+exclude = ["sp1/examples/target", "sp1/crates/core/test-elf/program"]
+
+[workspace.package]
+version = "5.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AntChainOpenLabs/zkdtvm-stark-verifier"
+keywords = ["zkdtvm", "zero-knowledge", "zkvm"]
+categories = ["cryptography"]
+
+[workspace.dependencies]
+# === WHIR PCS ===
+pcs = { path = "WHIR-pcs/pcs", package = "whir-pcs" }
+
+# === Published dt-compatible Plonky3 crates ===
+p3-field = { package = "dt-p3-field", version = "=0.8.0" }
+p3-air = { package = "dt-p3-air", version = "=0.8.0" }
+p3-baby-bear = { package = "dt-p3-baby-bear", version = "=0.8.0", features = ["nightly-features"] }
+p3-bn254-fr = { package = "dt-p3-bn254-fr", version = "=0.8.0" }
+p3-koala-bear = { package = "dt-p3-koala-bear", version = "=0.8.0" }
+p3-poseidon2 = { package = "dt-p3-poseidon2", version = "=0.8.0" }
+p3-symmetric = { package = "dt-p3-symmetric", version = "=0.8.0" }
+p3-dft = { package = "dt-p3-dft", version = "=0.8.0" }
+p3-matrix = { package = "dt-p3-matrix", version = "=0.8.0" }
+p3-merkle-tree = { package = "dt-p3-merkle-tree", version = "=0.8.0" }
+p3-commit = { package = "dt-p3-commit", version = "=0.8.0" }
+p3-fri = { package = "dt-p3-fri", version = "=0.8.0" }
+p3-challenger = { package = "dt-p3-challenger", version = "=0.8.0" }
+p3-util = { package = "dt-p3-util", version = "=0.8.0" }
+p3-interpolation = { package = "dt-p3-interpolation", version = "=0.8.0" }
+p3-uni-stark = { package = "dt-p3-uni-stark", version = "=0.8.0" }
+p3-keccak-air = { package = "dt-p3-keccak-air", version = "=0.8.0" }
+p3-sha256 = { package = "dt-p3-sha256", version = "=0.8.0" }
+p3-mds = { package = "dt-p3-mds", version = "=0.8.0" }
+p3-maybe-rayon = { package = "dt-p3-maybe-rayon", version = "=0.8.0", features = ["parallel"] }
+
+# === sp1 internal crates ===
+dt-build = { path = "sp1/crates/build", version = "5.0.0", default-features = false }
+dt-cli = { path = "sp1/crates/cli", version = "5.0.0", default-features = false }
+dt-core-machine = { path = "sp1/crates/core/machine", version = "5.0.0", default-features = false, features = ["sys"] }
+dt-core-executor = { path = "sp1/crates/core/executor", version = "5.0.0", default-features = false }
+dt-curves = { path = "sp1/crates/curves", version = "5.0.0" }
+dt-derive = { path = "sp1/crates/derive", version = "5.0.0" }
+dt-helper = { path = "sp1/crates/helper", version = "5.0.0", default-features = false }
+dt-primitives = { path = "sp1/crates/primitives", version = "5.0.0", default-features = false }
+dt-prover = { path = "sp1/crates/sc_prover", default-features = false }
+dt-recursion-compiler = { path = "sp1/crates/recursion/compiler", version = "5.0.0", default-features = false, features = ["debug"] }
+dt-recursion-core = { path = "sp1/crates/recursion/core", version = "5.0.0", default-features = false, features = ["sys"] }
+dt-recursion-derive = { path = "sp1/crates/recursion/derive", version = "5.0.0", default-features = false }
+dt-recursion-gnark-ffi = { path = "sp1/crates/recursion/gnark-ffi", version = "5.0.0", default-features = false }
+dt-recursion-circuit = { path = "sp1/crates/recursion/circuit", version = "5.0.0", default-features = false, features = ["verify"] }
+dt-sdk = { path = "sp1/crates/sdk_sc", default-features = false }
+dt-stark = { path = "sp1/crates/stark", version = "5.0.0", default-features = false }
+polyair = { path = "sp1/crates/polyair", default-features = false }
+dt-lib = { path = "sp1/crates/zkvm/lib", version = "5.0.0", default-features = false }
+dt-zkvm = { path = "sp1/crates/zkvm/entrypoint", version = "5.0.0", default-features = false }
+native-recursion = { path = "sp1/crates/native-recursion", version = "5.0.0", default-features = false }
+
+# For testing.
+test-artifacts = { path = "sp1/crates/test-artifacts" }
+dt-core-test-elf = { path = "sp1/crates/core/test-elf" }
+
+# === misc ===
+hashbrown = "0.14.5"
+itertools = "0.13.0"
+serde = "1.0.204"
+serde_json = "1.0.132"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+time = ">=0.3.0, <0.3.37"
+blake3 = { version = "1.6.1", default-features = false }
+sha2 = { version = "0.10.8", default-features = false }
+log = "0.4.21"
+enum-map = { version = "2.7.3", features = ["serde"] }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+debug = 1
+
+[profile.test]
+opt-level = 3
+lto = "off"
+
+[profile.bench]
+opt-level = 3
+
+[profile.fast]
+inherits = "release"
+debug = true
+debug-assertions = true
+
+[profile.profiling]
+inherits = "release"
+debug = true
+
+[profile.build-fast]
+inherits = "release"
+incremental = true
+lto = "off"
+
+[workspace.metadata.typos]
+default.extend-ignore-re = [
+  "Jo-Philipp Wich",
+  "SubEIN",
+  "DivEIN",
+  "CommitCommitedValuesDigest",
+]
+default.extend-ignore-words-re = ["(?i)groth", "TRE"]
+
+[workspace.lints.clippy]
+print_stdout = "warn"
+print_stderr = "warn"

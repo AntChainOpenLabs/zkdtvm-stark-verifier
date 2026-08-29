@@ -1,0 +1,36 @@
+[package]
+name = "dt-build"
+description = "Build an SP1 program."
+readme = "README.md"
+
+# Note: The release workflow depends on `dt-build` version being set by the workspace, and that the `dt-build` version refers to the canonical version.
+# **Do not change this**, unless the release workflow is changed accordingly.
+#
+# The version of `dt-build` is used for:
+# - The name of the release tag on merge to `main`.
+# - The default Docker image tag for this SP1 version..
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+dt-prover = { workspace = true, default-features = false }
+cargo_metadata = "0.18.1"
+anyhow = { version = "1.0.83" }
+clap = { version = "4.5.9", features = ["derive", "env"] }
+dirs = "5.0.1"
+chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
+
+[features]
+# NOTE: 不要设置默认 field（koalabear / babybear）。
+# `test-artifacts` 等 crate 经由 dev-dependencies 引用本 crate；若设默认 field，
+# Cargo feature unification 会把它与上游传入的另一种 field 合并，导致
+# `dt-primitives` 同时启用 koalabear + babybear，触发 compile_error!。
+# Field / PCS 选择应由顶层 crate 显式决定。
+default = []
+koalabear = ["dt-prover/koalabear"]
+babybear = ["dt-prover/babybear"]
+ext5 = ["dt-prover/ext5"]

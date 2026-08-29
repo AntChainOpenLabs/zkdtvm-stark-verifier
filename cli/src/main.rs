@@ -6,7 +6,10 @@ use clap::Parser;
 use zkdtvm_stark_verifier::verify_compressed_bytes;
 
 #[derive(Parser)]
-#[command(name = "zkdtvm-stark-verifier", about = "Verify zkdtvm STARK compressed proofs")]
+#[command(
+    name = "zkdtvm-stark-verifier",
+    about = "Verify zkdtvm STARK compressed proofs"
+)]
 struct Cli {
     /// Path to the serialized proof file (bincode)
     #[arg(long)]

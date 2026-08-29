@@ -1,0 +1,129 @@
+[package]
+name = "dt-prover"
+description = "SP1 is a performant, 100% open-source, contributor-friendly zkVM."
+readme = "../../README.md"
+# todo!(n): update version to use workspace on next release
+version = "5.0.1"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+exclude = ["src/vk_map.bin"]
+
+[dependencies]
+p3-matrix = { workspace = true }
+dt-recursion-compiler = { workspace = true, default-features = false }
+dt-recursion-core = { workspace = true, default-features = false }
+dt-recursion-circuit = { workspace = true, default-features = false }
+dt-recursion-gnark-ffi = { workspace = true, default-features = false }
+dt-core-machine = { workspace = true, default-features = false }
+dt-core-executor = { workspace = true, default-features = false }
+dt-stark = { workspace = true, default-features = false }
+p3-symmetric = { workspace = true }
+
+dt-primitives = { workspace = true, default-features = false }
+# Optional: the native recursion ladder backend (koalabear + ext5 only). The dep itself
+# pins koalabear/ext5 on its dependencies, so it MUST stay optional — an unconditional
+# edge would break babybear builds via feature unification.
+native-recursion = { workspace = true, optional = true }
+p3-field = { workspace = true }
+p3-challenger = { workspace = true }
+p3-baby-bear = { workspace = true }
+p3-bn254-fr = { workspace = true }
+p3-commit = { workspace = true }
+p3-util = { workspace = true }
+pcs = {workspace = true}
+polyair = { workspace = true, default-features = false }
+bincode = "1.3.3"
+serde = { workspace = true, features = ["derive", "rc"] }
+itertools = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4.5.9", features = ["derive", "env"] }
+anyhow = "1.0.83"
+dirs = "5.0.1"
+serial_test = "3.1.1"
+num-bigint = "0.4.6"
+thiserror = "1.0.63"
+rayon = "1.10.0"
+lru = "0.12.4"
+eyre = "0.6.12"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-appender = "0.2.3"
+
+[build-dependencies]
+downloader = { version = "0.2", default-features = false, features = [
+  "rustls-tls",
+  "verify",
+] }
+sha2 = { version = "0.10" }
+hex = "0.4"
+bincode = "1.3.3"
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+# Field features hardcoded on the DEV edge only — see the same note in sdk_sc: the
+# resolver-v2 build-dep universe (test-artifacts build.rs → dt-build → dt-prover)
+# does not inherit the normal-graph field selection and cannot compile field-less.
+# Consequence: `cargo test -p dt-prover` supports koalabear only.
+test-artifacts = { path = "../test-artifacts", features = ["koalabear", "ext5"] }
+
+[[bin]]
+name = "build_plonk_bn254"
+path = "scripts/build_plonk_bn254.rs"
+
+[[bin]]
+name = "build_groth16_bn254"
+path = "scripts/build_groth16_bn254.rs"
+
+[[bin]]
+name = "build_recursion_vks"
+path = "scripts/build_recursion_vks.rs"
+
+[[bin]]
+name = "find_maximal_shapes"
+path = "scripts/find_maximal_shapes.rs"
+
+# [[bin]]
+# name = "find_small_shapes"
+# path = "scripts/find_small_shapes.rs"
+
+[[bin]]
+name = "find_oom_shapes"
+path = "scripts/find_oom_shapes.rs"
+
+# [[bin]]
+# name = "find_recursion_shapes"
+# path = "scripts/find_recursion_shapes.rs"
+
+# [[bin]]
+# name = "test_shape_fixing"
+# path = "scripts/test_shape_fixing.rs"
+
+[[bin]]
+name = "post_trusted_setup"
+path = "scripts/post_trusted_setup.rs"
+
+[features]
+# NOTE: 不要设置默认 field（koalabear / babybear）。
+# 工作区里多个 crate（含 dev-dependencies 链路：test-artifacts -> dt-build -> dt-prover）
+# 会引用本 crate；一旦设默认 field，Cargo feature unification 会把它与上游传入的另一种
+# field 合并，导致 `dt-primitives` 同时启用 koalabear + babybear，触发 compile_error!。
+# Field / PCS 选择应由顶层 crate（dt-sdk / 命令行 --features 等）显式决定。
+default = []
+# The native recursion ladder backend. Implies koalabear + ext5 (the only field/extension
+# the native machines exist for); combining it with babybear is a compile_error!.
+# Deliberately NOT in `default` — see the note above.
+native-recursion = ["dep:native-recursion", "koalabear", "ext5"]
+native-gnark = ["dt-recursion-gnark-ffi/native"]
+koalabear = ["dt-core-machine/koalabear", "dt-core-executor/koalabear", "dt-recursion-core/koalabear", "dt-recursion-circuit/koalabear", "dt-stark/koalabear", "dt-recursion-compiler/koalabear", "dt-primitives/koalabear", "polyair/koalabear"]
+babybear = ["dt-core-machine/babybear", "dt-core-executor/babybear", "dt-recursion-core/babybear", "dt-recursion-circuit/babybear", "dt-stark/babybear", "dt-recursion-compiler/babybear", "dt-primitives/babybear", "polyair/babybear"]
+ext5 = ["dt-recursion-core/ext5", "dt-recursion-circuit/ext5", "dt-stark/ext5", "dt-recursion-compiler/ext5", "dt-primitives/ext5", "polyair/ext5"]
+debug = ["dt-core-machine/debug"]
+verify = ["dt-recursion-circuit/verify"]
+
+[lints]
+workspace = true

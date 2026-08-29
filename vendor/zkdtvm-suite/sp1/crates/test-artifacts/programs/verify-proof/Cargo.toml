@@ -1,0 +1,10 @@
+[package]
+name = "verify-proof"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+dt-zkvm = { path = "../../../../crates/zkvm/entrypoint", features = ["verify", "koalabear"] }
+hex = "0.4.3"
+sha2 = "0.10.8"

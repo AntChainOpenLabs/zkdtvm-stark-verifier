@@ -1,6 +1,6 @@
 //! End-to-end verification test using fixture files.
 //!
-//! Loads `proof.bin` and `vk.bin` from the project root and runs
+//! Loads `proof.bin` and `vk-full.bin` from the project root and runs
 //! the full compressed-proof verification pipeline, mirroring the CLI binary.
 //!
 //! If fixture files are not present the test is silently skipped so that
@@ -18,7 +18,7 @@ fn project_root() -> PathBuf {
 
 fn has_fixtures() -> bool {
     let root = project_root();
-    root.join("proof.bin").exists() && root.join("vk.bin").exists()
+    root.join("proof.bin").exists() && root.join("vk-full.bin").exists()
 }
 
 fn load_proof_bytes() -> Vec<u8> {
@@ -26,7 +26,7 @@ fn load_proof_bytes() -> Vec<u8> {
 }
 
 fn load_vk_bytes() -> Vec<u8> {
-    std::fs::read(project_root().join("vk.bin")).unwrap()
+    std::fs::read(project_root().join("vk-full.bin")).unwrap()
 }
 
 fn load_vk_digest_u32() -> [u32; DIGEST_SIZE] {
@@ -44,7 +44,7 @@ fn load_vk_digest_u32() -> [u32; DIGEST_SIZE] {
 fn e2e_verify_compressed_proof() {
     if !has_fixtures() {
         eprintln!(
-            "Fixture files (proof.bin, vk.bin) not found at {}. \
+            "Fixture files (proof.bin, vk-full.bin) not found at {}. \
              Run `gen_verifier_fixtures` to generate them. Skipping.",
             project_root().display()
         );

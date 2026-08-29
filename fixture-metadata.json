@@ -1,0 +1,9 @@
+{
+  "elf_sha256": "c6aab070fd6e8a2d4da77922daed5a39381c9f36fea2547e2e43c08c96ba5842",
+  "extension_degree": 5,
+  "fibonacci_n": 500,
+  "field": "koalabear",
+  "program": "fibonacci-program",
+  "proof_config": "RootSC (SHA256)",
+  "suite_commit": "82a57cadf6921e4fb45181d98f1a5af0148ab491"
+}

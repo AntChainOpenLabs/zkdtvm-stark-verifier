@@ -4,25 +4,28 @@ Standalone verifier for the zkdtvm STARK proof system.
 
 This project extracts the verification logic from the full zkdtvm into a self-contained library and CLI tool. The goal is to provide a minimal, auditable verification path that can be independently reviewed and integrated into external systems.
 
+This v0.8.0 release targets the native-recursion verifier stack from
+`zkdtvm-suite/banjie-dev` commit
+`82a57cadf6921e4fb45181d98f1a5af0148ab491`.
+
 ## Architecture
 
 ```text
 zkdtvm-stark-verifier/
 ├── Cargo.toml              # Workspace root
 ├── proof.bin               # Pre-generated compressed proof fixture
-├── vk.bin                  # Verifying key fixture
+├── vk-full.bin             # Full verifying key fixture
+├── vk.bin                  # Verifying key digest fixture
+├── fixture-metadata.json   # Suite commit and ELF SHA-256 provenance
 ├── message.bin             # Message fixture
+├── whir_config_koalabear_ext5.json # Sole supported WHIR parameter profile
 ├── crates/
 │   ├── verify/             # Core verification library
 │   │   └── src/
 │   │       ├── lib.rs       # Public API & re-exports
 │   │       ├── types.rs     # DTVerifyingKey, DTProof, HashableKey
 │   │       └── verify.rs    # verify_compressed() entry point
-│   ├── stark/              # STARK machine + sumcheck verifier
-│   ├── basefold/           # Basefold multilinear PCS
-│   ├── recursion/          # Recursion AIR chips
-│   ├── primitives/         # Poseidon2, field types
-│   └── derive/             # Proc macros
+├── vendor/                 # Minimal zkdtvm-suite verifier dependency snapshot
 └── cli/                    # CLI binary
     └── src/
         └── main.rs          # Proof loading & verification
@@ -30,7 +33,15 @@ zkdtvm-stark-verifier/
 
 ## Dependencies
 
-Plonky3 crates are published on [crates.io](https://crates.io) as `dt-p3-*` (v0.6.2-fix.1). No internal repository access is required.
+The verifier uses a vendored snapshot of the latest `zkdtvm-suite` verifier
+stack. Its Plonky3 layer is provided by 20 exact crates.io dependencies named
+`dt-p3-*` at version `0.8.0`; there is no local or internal Git dependency on
+Plonky3. The verifier supports only the KoalaBear degree-5 challenge field and
+uses the suite's `whir_config_koalabear_ext5.json`, whose key settings are:
+
+- `NUM_SKIP_ROUNDS = 1`
+- `CHIP_LOG_HEIGHT_THRESHOLD = 0`
+- root shrink `log_final_poly_len = 6`
 
 ## Build
 
@@ -43,9 +54,9 @@ cargo build --release
 ### As a library
 
 ```rust
-use zkdtvm_stark_verifier::{verify_compressed, DTVerifyingKey, DTReduceProof};
+use zkdtvm_stark_verifier::{verify_compressed, DTVerifyingKey, DTReduceProof, RootSC};
 
-fn verify(proof: &DTReduceProof<_>, vk: &DTVerifyingKey) {
+fn verify(proof: &DTReduceProof<RootSC>, vk: &DTVerifyingKey) {
     verify_compressed(proof, vk).expect("verification failed");
 }
 ```
@@ -54,14 +65,15 @@ fn verify(proof: &DTReduceProof<_>, vk: &DTVerifyingKey) {
 
 ```bash
 # Verify the included fixture proof
-zkdtvm-stark-verifier --proof proof.bin --vk vk.bin --message message.bin
+zkdtvm-stark-verifier --proof proof.bin --vk vk-full.bin
 
 # Or after cargo build --release:
-./target/release/zkdtvm-stark-verifier --proof proof.bin --vk vk.bin --message message.bin
+./target/release/zkdtvm-stark-verifier --proof proof.bin --vk vk-full.bin
 ```
 
-The CLI expects a bincode-serialized `DTReduceProof<InnerSC>` proof. The verifying key file may
-be either a bincode-serialized `DTVerifyingKey` or a 32-byte bincode-serialized `[u32; 8]` digest.
+The CLI expects a bincode-serialized `DTReduceProof<RootSC>` proof and a full
+bincode-serialized `DTVerifyingKey`. A 32-byte digest is not sufficient for the
+native-recursion external checks, so use `vk-full.bin` for verification.
 
 ## Test
 
@@ -70,20 +82,38 @@ be either a bincode-serialized `DTVerifyingKey` or a 32-byte bincode-serialized 
 cargo test --release -p zkdtvm-stark-verifier -p zkdtvm-stark-verifier-cli
 ```
 
+The repository also provides `scripts/verify-release.sh`, which runs the complete
+release-profile fixture and CLI verification sequence.
+
+## Regenerating fixtures
+
+After synchronizing this repository to the approved remote build server, run:
+
+```bash
+./scripts/generate-fixtures.sh
+./scripts/verify-release.sh
+```
+
+Both scripts use Cargo's release profile. The generator first builds the latest
+vendored `fibonacci-program` ELF, calls `setup` with that ELF, and writes the ELF
+SHA-256 to `fixture-metadata.json` alongside the regenerated proof and keys.
+
 ## Fixture Files
 
-Three pre-generated binary fixtures are included in the project root:
+Pre-generated binary fixtures are included in the project root:
 
 | File          | Description                                                  |
 | ------------- | ------------------------------------------------------------ |
-| `proof.bin`   | Compressed proof fixture generated from SP1 v0.6.3-compatible verifier settings |
+| `proof.bin`   | Compressed `RootSC` proof generated from the pinned suite snapshot |
+| `vk-full.bin` | Full bincode-serialized `DTVerifyingKey` derived from the latest ELF |
 | `vk.bin`      | Verifying key digest (`[u32; 8]`)                            |
 | `message.bin` | Optional message payload                                     |
+| `fixture-metadata.json` | Suite commit, program, and ELF SHA-256 provenance   |
 
 ## Design Decisions
 
-- **Field**: KoalaBear (31-bit prime) — the only supported field
-- **PCS**: Basefold — the only supported polynomial commitment scheme
+- **Field**: KoalaBear extension degree 5
+- **PCS**: mixed native-recursion stack, using Jagged + FRI and SWIRL + WHIR
 
 ## Acknowledgements
 

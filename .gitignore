@@ -4,6 +4,15 @@
 # Cargo config
 .cargo
 
+# IDE
+.idea/
+.vscode/
+
+# Vendored zkdtvm-suite non-source artifacts
+vendor/zkdtvm-suite/**/audits/
+vendor/zkdtvm-suite/sp1/examples/rsp/*.bin
+vendor/zkdtvm-suite/sp1/examples/rsp/*.elf
+
 # MacOS nuisances
 .DS_Store
 

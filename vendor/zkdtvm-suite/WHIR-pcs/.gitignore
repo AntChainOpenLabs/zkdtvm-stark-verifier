@@ -1,0 +1,12 @@
+target/
+
+Cargo.lock
+
+# vscode
+*.vscode
+
+# idea
+*.idea
+
+# mac cache
+*.DS_Store

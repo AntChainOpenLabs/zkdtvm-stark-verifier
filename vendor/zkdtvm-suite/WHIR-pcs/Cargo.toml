@@ -1,0 +1,37 @@
+[workspace]
+members = ["pcs"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+keywords = ["SNARK", "polynomial-commitment-scheme", "proof-system"]
+
+# Published dt-compatible Plonky3 crates used by the verifier snapshot.
+[workspace.dependencies]
+p3-field       = { package = "dt-p3-field", version = "=0.8.0" }
+p3-baby-bear   = { package = "dt-p3-baby-bear", version = "=0.8.0", features = ["nightly-features"] }
+p3-poseidon2   = { package = "dt-p3-poseidon2", version = "=0.8.0" }
+p3-symmetric   = { package = "dt-p3-symmetric", version = "=0.8.0" }
+p3-dft         = { package = "dt-p3-dft", version = "=0.8.0" }
+p3-matrix      = { package = "dt-p3-matrix", version = "=0.8.0" }
+p3-merkle-tree = { package = "dt-p3-merkle-tree", version = "=0.8.0" }
+p3-commit      = { package = "dt-p3-commit", version = "=0.8.0" }
+p3-fri         = { package = "dt-p3-fri", version = "=0.8.0" }
+p3-challenger  = { package = "dt-p3-challenger", version = "=0.8.0" }
+p3-util        = { package = "dt-p3-util", version = "=0.8.0" }
+p3-maybe-rayon = { package = "dt-p3-maybe-rayon", version = "=0.8.0", features = ["parallel"] }
+
+[profile.test]
+opt-level = 3
+lto = "off"
+
+[profile.release]
+debug = 1
+codegen-units = 1
+lto = "fat"
+
+[profile.build-fast]
+inherits = "release"
+incremental = true
+lto = "off"
