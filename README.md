@@ -4,9 +4,8 @@ Standalone verifier for the zkdtvm STARK proof system.
 
 This project extracts the verification logic from the full zkdtvm into a self-contained library and CLI tool. The goal is to provide a minimal, auditable verification path that can be independently reviewed and integrated into external systems.
 
-This v0.8.0 release targets the native-recursion verifier stack from
-`zkdtvm-suite/banjie-dev` commit
-`82a57cadf6921e4fb45181d98f1a5af0148ab491`.
+This v0.8.0 release verifies proofs produced by zkdtvm v0.8.0 and uses the
+native-recursion verification path.
 
 ## Architecture
 
@@ -16,7 +15,7 @@ zkdtvm-stark-verifier/
 ├── proof.bin               # Pre-generated compressed proof fixture
 ├── vk-full.bin             # Full verifying key fixture
 ├── vk.bin                  # Verifying key digest fixture
-├── fixture-metadata.json   # Suite commit and ELF SHA-256 provenance
+├── fixture-metadata.json   # Fixture and ELF SHA-256 provenance
 ├── message.bin             # Message fixture
 ├── whir_config_koalabear_ext5.json # Sole supported WHIR parameter profile
 ├── crates/
@@ -25,7 +24,7 @@ zkdtvm-stark-verifier/
 │   │       ├── lib.rs       # Public API & re-exports
 │   │       ├── types.rs     # DTVerifyingKey, DTProof, HashableKey
 │   │       └── verify.rs    # verify_compressed() entry point
-├── vendor/                 # Minimal zkdtvm-suite verifier dependency snapshot
+├── vendor/                 # Vendored verifier implementation dependencies
 └── cli/                    # CLI binary
     └── src/
         └── main.rs          # Proof loading & verification
@@ -33,11 +32,11 @@ zkdtvm-stark-verifier/
 
 ## Dependencies
 
-The verifier uses a vendored snapshot of the latest `zkdtvm-suite` verifier
-stack. Its Plonky3 layer is provided by 20 exact crates.io dependencies named
-`dt-p3-*` at version `0.8.0`; there is no local or internal Git dependency on
-Plonky3. The verifier supports only the KoalaBear degree-5 challenge field and
-uses the suite's `whir_config_koalabear_ext5.json`, whose key settings are:
+The repository is self-contained and does not require access to private source
+repositories. Its Plonky3 layer is provided by 20 exact crates.io dependencies
+named `dt-p3-*` at version `0.8.0`. The verifier supports only the KoalaBear
+degree-5 challenge field and uses `whir_config_koalabear_ext5.json`, whose key
+settings are:
 
 - `NUM_SKIP_ROUNDS = 1`
 - `CHIP_LOG_HEIGHT_THRESHOLD = 0`
@@ -87,16 +86,16 @@ release-profile fixture and CLI verification sequence.
 
 ## Regenerating fixtures
 
-After synchronizing this repository to the approved remote build server, run:
+To regenerate the included fixtures, run:
 
 ```bash
 ./scripts/generate-fixtures.sh
 ./scripts/verify-release.sh
 ```
 
-Both scripts use Cargo's release profile. The generator first builds the latest
-vendored `fibonacci-program` ELF, calls `setup` with that ELF, and writes the ELF
-SHA-256 to `fixture-metadata.json` alongside the regenerated proof and keys.
+Both scripts use Cargo's release profile. The generator builds the bundled
+`fibonacci-program` ELF, calls `setup` with that ELF, and writes the ELF SHA-256
+to `fixture-metadata.json` alongside the regenerated proof and keys.
 
 ## Fixture Files
 
@@ -104,11 +103,11 @@ Pre-generated binary fixtures are included in the project root:
 
 | File          | Description                                                  |
 | ------------- | ------------------------------------------------------------ |
-| `proof.bin`   | Compressed `RootSC` proof generated from the pinned suite snapshot |
+| `proof.bin`   | Compressed `RootSC` proof compatible with zkdtvm v0.8.0 |
 | `vk-full.bin` | Full bincode-serialized `DTVerifyingKey` derived from the latest ELF |
 | `vk.bin`      | Verifying key digest (`[u32; 8]`)                            |
 | `message.bin` | Optional message payload                                     |
-| `fixture-metadata.json` | Suite commit, program, and ELF SHA-256 provenance   |
+| `fixture-metadata.json` | Program and ELF SHA-256 provenance                 |
 
 ## Design Decisions
 
