@@ -16,6 +16,7 @@ dt-stark = { workspace = true }
 dt-primitives = { workspace = true }
 dt-prover = { workspace = true }
 dt-recursion-core = { workspace = true }
+native-recursion = { workspace = true }
 
 p3-field = { workspace = true }
 

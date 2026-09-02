@@ -36,6 +36,7 @@ dt-primitives = { path = "vendor/zkdtvm-suite/sp1/crates/primitives", default-fe
 dt-prover = { path = "vendor/zkdtvm-suite/sp1/crates/sc_prover", default-features = false, features = ["koalabear", "ext5", "native-recursion"] }
 dt-recursion-core = { path = "vendor/zkdtvm-suite/sp1/crates/recursion/core", default-features = false, features = ["koalabear", "ext5"] }
 dt-stark = { path = "vendor/zkdtvm-suite/sp1/crates/stark", default-features = false, features = ["koalabear", "ext5"] }
+native-recursion = { path = "vendor/zkdtvm-suite/sp1/crates/native-recursion", default-features = false }
 p3-field = { package = "dt-p3-field", version = "=0.8.0" }
 
 # --- third-party ---

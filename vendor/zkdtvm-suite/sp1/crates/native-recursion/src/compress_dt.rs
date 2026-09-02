@@ -21,7 +21,7 @@ use dt_core_machine::reduce::DTReduceProof;
 use dt_stark::{
     air::MachineAir,
     sumcheck::{
-        config::{MlCom, MlPcsOpeningProof, SCStarkGenericConfig},
+        config::{MlCom, MlPcsOpeningProof, MlPcsProverData, SCStarkGenericConfig},
         keys::{SCStarkProvingKey, SCStarkVerifyingKey},
         proof::{SCMachineProof, SCShardProof},
     },
@@ -562,9 +562,34 @@ pub struct NativeLadderContext<P: NativeProverProvider = CpuNativeProver> {
     pub l4_vk: SCStarkVerifyingKey<RootSC>,
 }
 
+/// Portable, verifier-only material for the frozen L4 machine.
+///
+/// Unlike [`NativeLadderCachedArtifacts`], this deliberately excludes the L1-L3
+/// programs and the very large L4 PCS codeword. The latter is derived once when
+/// this artifact is loaded and then retained by [`NativeL4Verifier`].
+#[derive(Clone, Serialize, Deserialize)]
+struct NativeL4VerifierArtifact {
+    schema_version: u32,
+    global146_identity: [u8; 32],
+    l4_digest: [u32; DIGEST_SIZE],
+    l4_program: RecursionNativeProgram<F>,
+    l4_vk: SCStarkVerifyingKey<RootSC>,
+}
+
+/// A verifier for the terminal, elided L4 proof.
+///
+/// Construction from an artifact builds only the verifier machine and runs its
+/// single L4 setup. It does not construct or set up the L1-L3 ladder.
+pub struct NativeL4Verifier {
+    l4_prover: NativeRootProver,
+    l4_prep_data: MlPcsProverData<RootSC>,
+    l4_vk: SCStarkVerifyingKey<RootSC>,
+}
+
 // Cache schema for the current KoalaBear/ext5 ladder artifacts and static constraint plans.
 const NATIVE_LADDER_CACHE_SCHEMA_VERSION: u32 =
     dt_stark::global_d11::GLOBAL146_NATIVE_LADDER_CACHE_SCHEMA_VERSION;
+const NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const NATIVE_LADDER_CACHE_MAX_BYTES: u64 = 1 << 30;
 static NATIVE_LADDER_CACHE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -1509,6 +1534,127 @@ fn write_ladder_cache(
         )
     })();
     (context, publish_result.err())
+}
+
+impl NativeL4Verifier {
+    /// Build the release artifact once, outside the verifier runtime.
+    pub fn build_artifact_bytes() -> NativeRecursionAssemblyResult<Vec<u8>> {
+        // Use the same provider-aware canonical builder as the production
+        // `DTProver::native_backend` path. The older `build_uncached` path is
+        // retained for legacy disk-cache compatibility and is not authoritative.
+        let context = build_ladder_with_provider::<CpuNativeProver>()?;
+        let l4_digest = digest_u32(root_vk_digest(&context.l4_vk));
+        let artifact = NativeL4VerifierArtifact {
+            schema_version: NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION,
+            global146_identity: dt_stark::global_d11::GLOBAL146_COMPOSITE_IDENTITY,
+            l4_digest,
+            l4_program: context.l4_program,
+            l4_vk: context.l4_vk,
+        };
+        bounded_cache_bincode()
+            .serialize(&artifact)
+            .map_err(|err| validation(format!("encode L4 verifier artifact: {err}")))
+    }
+
+    /// Load an L4 verifier with one L4 setup and without constructing L1-L3.
+    pub fn from_artifact_bytes(bytes: &[u8]) -> NativeRecursionAssemblyResult<Self> {
+        if bytes.len() as u64 > NATIVE_LADDER_CACHE_MAX_BYTES {
+            return Err(validation(format!(
+                "L4 verifier artifact exceeds {NATIVE_LADDER_CACHE_MAX_BYTES} bytes"
+            )));
+        }
+        let artifact: NativeL4VerifierArtifact = bounded_cache_bincode()
+            .deserialize(bytes)
+            .map_err(|err| validation(format!("decode L4 verifier artifact: {err}")))?;
+        if artifact.schema_version != NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION {
+            return Err(validation(format!(
+                "unsupported L4 verifier artifact schema {}",
+                artifact.schema_version
+            )));
+        }
+        if artifact.global146_identity != dt_stark::global_d11::GLOBAL146_COMPOSITE_IDENTITY {
+            return Err(validation("L4 verifier artifact Global146 identity mismatch"));
+        }
+        validate_expected_l4_digest(&artifact.l4_vk, artifact.l4_digest)?;
+        validate_final_replay_layout(&artifact.l4_program)?;
+        let l4_prover = native_root_shrink_prover(&artifact.l4_program)?;
+        let (l4_pk, generated_l4_vk) = l4_prover.setup(&artifact.l4_program);
+        if !verifying_keys_equal(&generated_l4_vk, &artifact.l4_vk) {
+            return Err(validation("L4 verifier artifact program/vk mismatch"));
+        }
+        Ok(Self {
+            l4_prover,
+            l4_prep_data: l4_pk.data,
+            l4_vk: artifact.l4_vk,
+        })
+    }
+
+    /// Verify only the compact wire form whose fixed first preprocessing opening
+    /// is absent. A non-elided proof is rejected even if it would otherwise verify.
+    pub fn verify_elided<CoreProofSC>(
+        &self,
+        reduce: &DTReduceProof<RootSC>,
+        core_vk: &SCStarkVerifyingKey<CoreProofSC>,
+    ) -> NativeRecursionAssemblyResult<()>
+    where
+        CoreProofSC: SCStarkGenericConfig<Val = F>,
+        CoreProofSC::Mlpcs: MlPCS<Commitment = MlCom<RecordingSC>>,
+    {
+        if !verifying_keys_equal(&self.l4_vk, &reduce.vk) {
+            return Err(validation("presented root vk differs from the frozen vk_L4"));
+        }
+
+        // `core_vk_statement_digest` assumes these externally supplied values
+        // have already been validated and uses `expect` internally. Validate
+        // them here so malformed bytes fail closed instead of trapping WASM.
+        dt_stark::global_d11::validate_global146_identity(&core_vk.global146_identity)
+            .map_err(|err| validation(format!("invalid core vk Global146 identity: {err}")))?;
+        dt_stark::global_d11::canonical_program_boundary_fields_v1::<F>(
+            &core_vk.program_boundary,
+        )
+        .map_err(|err| validation(format!("invalid core vk program boundary: {err:?}")))?;
+
+        let public = &reduce.proof.public_values;
+        let (global_start, global_end) = checked_native_root_public_interval(public)?;
+        let mut proof_for_verify = reduce.proof.clone();
+        let expected_batches = proof_for_verify.dimensions.len();
+        let restored = self
+            .l4_prover
+            .config()
+            .mlpcs()
+            .restore_elided_first_stacked_input_batch_pruned(
+                &mut proof_for_verify.opening_proof,
+                &self.l4_prep_data,
+                expected_batches,
+            )
+            .map_err(|err| validation(format!("restore root prep input opening: {err:?}")))?;
+        if !restored {
+            return Err(validation(
+                "root proof must use the elided L4 preprocessing-opening wire form",
+            ));
+        }
+
+        verify_recursion(
+            &self.l4_prover,
+            &self.l4_vk,
+            &SCMachineProof { shard_proofs: vec![proof_for_verify] },
+        )?;
+
+        let expected_dt_vk = core_vk_statement_digest(
+            &core_vk.commit,
+            core_vk.pc_start,
+            &core_vk.program_boundary,
+            &core_vk.global146_identity,
+        );
+        for idx in 0..DIGEST_SIZE {
+            if public[NATIVE_PV_DT_VK_DIGEST_START + idx] != expected_dt_vk[idx] {
+                return Err(validation("root dt_vk digest does not match the core vk"));
+            }
+        }
+        validate_native_root_global_interval(&core_vk.program_boundary, global_start, global_end)
+            .map_err(|error| validation(error.to_string()))?;
+        Ok(())
+    }
 }
 
 impl NativeLadderContext {

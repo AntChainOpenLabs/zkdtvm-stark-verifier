@@ -1,7 +1,44 @@
 use dt_prover::{components::SCCpuProverComponents, DTProver};
 use dt_stark::MachineVerificationError;
+use native_recursion::compress_dt::NativeL4Verifier;
 
 use crate::{CoreSC, DTReduceProof, DTVerifyingKey, RootSC};
+
+/// Reusable verifier backed by a release-built, verifier-only L4 artifact.
+///
+/// Loading this type constructs and sets up only the L4 verifier machine. It
+/// never builds or sets up the L1-L3 compression ladder.
+pub struct CompressedVerifier {
+    native_l4: NativeL4Verifier,
+}
+
+impl CompressedVerifier {
+    pub fn from_artifact_bytes(artifact_bytes: &[u8]) -> Result<Self, String> {
+        let native_l4 = NativeL4Verifier::from_artifact_bytes(artifact_bytes)
+            .map_err(|err| format!("L4 verifier artifact: {err}"))?;
+        Ok(Self { native_l4 })
+    }
+
+    pub fn verify_compressed_bytes(
+        &self,
+        proof_bytes: &[u8],
+        vk_bytes: &[u8],
+    ) -> Result<(), String> {
+        let proof: DTReduceProof<RootSC> =
+            bincode::deserialize(proof_bytes).map_err(|e| format!("proof deserialize: {e}"))?;
+        let vk: DTVerifyingKey = bincode::deserialize(vk_bytes)
+            .map_err(|e| format!("vk deserialize: expected full DTVerifyingKey: {e}"))?;
+        self.native_l4
+            .verify_elided(&proof, &vk.vk)
+            .map_err(|e| format!("{e}"))
+    }
+}
+
+/// Generate the fixed verifier artifact during a release build, never in WASM.
+pub fn build_l4_verifier_artifact_bytes() -> Result<Vec<u8>, String> {
+    NativeL4Verifier::build_artifact_bytes()
+        .map_err(|err| format!("build L4 verifier artifact: {err}"))
+}
 
 /// Byte-level entry point for WASM and other FFI consumers.
 ///

@@ -4650,6 +4650,7 @@ dependencies = [
  "dt-prover",
  "dt-recursion-core",
  "dt-stark",
+ "native-recursion",
  "serde",
  "tracing",
 ]
