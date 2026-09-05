@@ -1,16 +1,22 @@
-use anyhow::{Context, Result};
-use dt_prover::{components::SCCpuProverComponents, DTProver};
+use anyhow::{ensure, Context, Result};
 use p3_field::{AbstractField, PrimeField32};
-use zkdtvm_stark_verifier::{DTReduceProof, DTVerifyingKey, HashableKey, RootSC, SCField};
+use zkdtvm_stark_verifier::{
+    CompressedVerifier, DTReduceProof, DTVerifyingKey, HashableKey, RootSC, SCField,
+};
 
 fn main() -> Result<()> {
     let proof_bytes = std::fs::read("proof.bin").context("read proof.bin")?;
     let vk_full_bytes = std::fs::read("vk-full.bin").context("read vk-full.bin")?;
-    let vk_digest_bytes = std::fs::read("vk.bin").context("read vk.bin")?;
-
     let proof: DTReduceProof<RootSC> =
         bincode::deserialize(&proof_bytes).context("deserialize proof")?;
     let vk: DTVerifyingKey = bincode::deserialize(&vk_full_bytes).context("deserialize full vk")?;
+    if std::env::args().nth(1).as_deref() == Some("--write-vk-digest") {
+        let path = std::env::args()
+            .nth(2)
+            .context("--write-vk-digest requires an output path")?;
+        std::fs::write(path, bincode::serialize(&vk.hash_u32())?)?;
+    }
+    let vk_digest_bytes = std::fs::read("vk.bin").context("read vk.bin")?;
     let expected_digest: [u32; zkdtvm_stark_verifier::DIGEST_SIZE] =
         bincode::deserialize(&vk_digest_bytes).context("deserialize digest vk")?;
     let full_digest = vk.hash_babybear();
@@ -46,15 +52,13 @@ fn main() -> Result<()> {
         "vk.bin digest u32: {:?}",
         expected_digest.map(|value| value.as_canonical_u32())
     );
+    ensure!(full_digest == expected_digest, "full VK does not match vk.bin");
 
-    let prover = DTProver::<SCCpuProverComponents>::new();
-    let native_backend = prover.native_backend().context("native backend")?;
-    println!(
-        "is native proof: {}",
-        native_backend
-            .is_native_proof(&proof)
-            .context("native proof check")?
-    );
+    CompressedVerifier::new()
+        .map_err(anyhow::Error::msg)?
+        .verify_compressed_bytes(&proof_bytes, &vk_full_bytes)
+        .map_err(anyhow::Error::msg)?;
+    println!("q131 full-opening proof verified without setup");
 
     Ok(())
 }

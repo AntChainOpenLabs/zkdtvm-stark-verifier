@@ -12,16 +12,15 @@ use std::{
         atomic::{AtomicU64, Ordering},
         OnceLock,
     },
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use bincode::Options;
 use dt_core_machine::reduce::DTReduceProof;
 use dt_stark::{
     air::MachineAir,
     sumcheck::{
-        config::{MlCom, MlPcsOpeningProof, MlPcsProverData, SCStarkGenericConfig},
+        config::{MlCom, MlPcsOpeningProof, SCStarkGenericConfig},
         keys::{SCStarkProvingKey, SCStarkVerifyingKey},
         proof::{SCMachineProof, SCShardProof},
     },
@@ -43,22 +42,21 @@ use crate::{
         native_root_shrink_prover, native_root_shrink_prover_with_provider, native_shrink_prover,
         native_shrink_prover_with_provider, prove_recursion_with_metrics, record_core_proof_shard,
         record_native_proof_shard, record_native_proof_shard_in_segment,
-        validate_l2_bootstrap_fixed_point, verify_recursion, CoreRecordingMachine, CpuNativeProver,
-        NativeProverFor, NativeProverProvider, NativeRecordingMachine,
-        NativeRecursionAssemblyError, NativeRecursionAssemblyResult, NativeRecursionProver,
-        NativeRootProver, NATIVE_ROOT_SHRINK_DEGREE_FLOOR, NATIVE_SHRINK_DEGREE_FLOOR,
+        validate_l2_bootstrap_fixed_point, verify_recursion, verify_root_recursion_shard,
+        CoreRecordingMachine, CpuNativeProver, NativeProverFor, NativeProverProvider,
+        NativeRecordingMachine, NativeRecursionAssemblyError, NativeRecursionAssemblyResult,
+        NativeRecursionProver, NativeRootProver, NATIVE_ROOT_SHRINK_DEGREE_FLOOR,
+        NATIVE_SHRINK_DEGREE_FLOOR,
     },
     native_air_dt::{
         validate_final_replay_layout, validate_l2_bootstrap_layout, NATIVE_AIR_REGISTRY_VERSION,
     },
     statement_dt::{
-        core_vk_statement_digest, native_vk_statement_digest,
-        validate_native_root_global_interval, NATIVE_PV_DIGEST_START,
-        NATIVE_PV_DT_VK_DIGEST_START, NATIVE_PV_GLOBAL_INTERVAL_END,
+        core_vk_statement_digest, native_vk_statement_digest, validate_native_root_global_interval,
+        NATIVE_PV_DIGEST_START, NATIVE_PV_DT_VK_DIGEST_START, NATIVE_PV_GLOBAL_INTERVAL_END,
         NATIVE_PV_GLOBAL_INTERVAL_START, NATIVE_PV_IS_COMPLETE, NATIVE_PV_VK_ROOT_START,
-        NATIVE_RECURSION_NUM_PV_ELTS,
-        STATEMENT_CONFIG_CLASS_BAKED_L2, STATEMENT_CONFIG_CLASS_BAKED_L3,
-        STATEMENT_CONFIG_CLASS_BAKED_LIFT,
+        NATIVE_RECURSION_NUM_PV_ELTS, STATEMENT_CONFIG_CLASS_BAKED_L2,
+        STATEMENT_CONFIG_CLASS_BAKED_L3, STATEMENT_CONFIG_CLASS_BAKED_LIFT,
     },
     statement_hash_air_dt::root_public_values_digest,
     symbolic_expr_adapter_dt::{RecursionPolyAirLeaf, RecursionPolyAirOp},
@@ -69,7 +67,7 @@ use crate::{
         RecursionStatementRole, ReplayCompatibleProofConfig, StatementConfigRow,
     },
     transcript_dt::poseidon2::{RecursionPoseidon2Memo, RecursionPoseidon2MemoSnapshot},
-    Instant,
+    verifier_dt::{require_full_root_input_opening, require_safe_root_polyair_shape},
 };
 
 const NODE_DIAGNOSTICS_ENV: &str = "DT_NATIVE_RECURSION_NODE_DIAGNOSTICS";
@@ -78,13 +76,13 @@ const LADDER_CACHE_REBUILD_ENV: &str = "DT_NATIVE_RECURSION_CACHE_REBUILD";
 
 fn node_diagnostics_enabled() -> bool {
     crate::debug_prints_enabled() ||
-        crate::env_var(NODE_DIAGNOSTICS_ENV)
+        std::env::var(NODE_DIAGNOSTICS_ENV)
             .is_ok_and(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
 }
 
 fn post_prove_verify_enabled() -> bool {
     cfg!(test) ||
-        crate::env_var(POST_PROVE_VERIFY_ENV)
+        std::env::var(POST_PROVE_VERIFY_ENV)
             .is_ok_and(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
 }
 
@@ -299,14 +297,7 @@ fn ratio_bps(numerator: usize, denominator: usize) -> u32 {
 }
 
 fn unix_now_ms() -> u128 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        0
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_millis())
-    }
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_millis())
 }
 
 fn merkle_union_census(record: &RecursionRecord) -> MerkleUnionCensus {
@@ -562,34 +553,9 @@ pub struct NativeLadderContext<P: NativeProverProvider = CpuNativeProver> {
     pub l4_vk: SCStarkVerifyingKey<RootSC>,
 }
 
-/// Portable, verifier-only material for the frozen L4 machine.
-///
-/// Unlike [`NativeLadderCachedArtifacts`], this deliberately excludes the L1-L3
-/// programs and the very large L4 PCS codeword. The latter is derived once when
-/// this artifact is loaded and then retained by [`NativeL4Verifier`].
-#[derive(Clone, Serialize, Deserialize)]
-struct NativeL4VerifierArtifact {
-    schema_version: u32,
-    global146_identity: [u8; 32],
-    l4_digest: [u32; DIGEST_SIZE],
-    l4_program: RecursionNativeProgram<F>,
-    l4_vk: SCStarkVerifyingKey<RootSC>,
-}
-
-/// A verifier for the terminal, elided L4 proof.
-///
-/// Construction from an artifact builds only the verifier machine and runs its
-/// single L4 setup. It does not construct or set up the L1-L3 ladder.
-pub struct NativeL4Verifier {
-    l4_prover: NativeRootProver,
-    l4_prep_data: MlPcsProverData<RootSC>,
-    l4_vk: SCStarkVerifyingKey<RootSC>,
-}
-
 // Cache schema for the current KoalaBear/ext5 ladder artifacts and static constraint plans.
 const NATIVE_LADDER_CACHE_SCHEMA_VERSION: u32 =
     dt_stark::global_d11::GLOBAL146_NATIVE_LADDER_CACHE_SCHEMA_VERSION;
-const NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const NATIVE_LADDER_CACHE_MAX_BYTES: u64 = 1 << 30;
 static NATIVE_LADDER_CACHE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -783,7 +749,7 @@ fn cache_validation(
 }
 
 fn force_ladder_cache_rebuild() -> bool {
-    crate::env_var(LADDER_CACHE_REBUILD_ENV)
+    std::env::var(LADDER_CACHE_REBUILD_ENV)
         .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
@@ -1536,138 +1502,9 @@ fn write_ladder_cache(
     (context, publish_result.err())
 }
 
-impl NativeL4Verifier {
-    /// Build the release artifact once, outside the verifier runtime.
-    pub fn build_artifact_bytes() -> NativeRecursionAssemblyResult<Vec<u8>> {
-        // Use the same provider-aware canonical builder as the production
-        // `DTProver::native_backend` path. The older `build_uncached` path is
-        // retained for legacy disk-cache compatibility and is not authoritative.
-        let context = build_ladder_with_provider::<CpuNativeProver>()?;
-        let l4_digest = digest_u32(root_vk_digest(&context.l4_vk));
-        let artifact = NativeL4VerifierArtifact {
-            schema_version: NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION,
-            global146_identity: dt_stark::global_d11::GLOBAL146_COMPOSITE_IDENTITY,
-            l4_digest,
-            l4_program: context.l4_program,
-            l4_vk: context.l4_vk,
-        };
-        bounded_cache_bincode()
-            .serialize(&artifact)
-            .map_err(|err| validation(format!("encode L4 verifier artifact: {err}")))
-    }
-
-    /// Load an L4 verifier with one L4 setup and without constructing L1-L3.
-    pub fn from_artifact_bytes(bytes: &[u8]) -> NativeRecursionAssemblyResult<Self> {
-        if bytes.len() as u64 > NATIVE_LADDER_CACHE_MAX_BYTES {
-            return Err(validation(format!(
-                "L4 verifier artifact exceeds {NATIVE_LADDER_CACHE_MAX_BYTES} bytes"
-            )));
-        }
-        let artifact: NativeL4VerifierArtifact = bounded_cache_bincode()
-            .deserialize(bytes)
-            .map_err(|err| validation(format!("decode L4 verifier artifact: {err}")))?;
-        if artifact.schema_version != NATIVE_L4_VERIFIER_ARTIFACT_SCHEMA_VERSION {
-            return Err(validation(format!(
-                "unsupported L4 verifier artifact schema {}",
-                artifact.schema_version
-            )));
-        }
-        if artifact.global146_identity != dt_stark::global_d11::GLOBAL146_COMPOSITE_IDENTITY {
-            return Err(validation("L4 verifier artifact Global146 identity mismatch"));
-        }
-        validate_expected_l4_digest(&artifact.l4_vk, artifact.l4_digest)?;
-        validate_final_replay_layout(&artifact.l4_program)?;
-        let l4_prover = native_root_shrink_prover(&artifact.l4_program)?;
-        let (l4_pk, generated_l4_vk) = l4_prover.setup(&artifact.l4_program);
-        if !verifying_keys_equal(&generated_l4_vk, &artifact.l4_vk) {
-            return Err(validation("L4 verifier artifact program/vk mismatch"));
-        }
-        Ok(Self {
-            l4_prover,
-            l4_prep_data: l4_pk.data,
-            l4_vk: artifact.l4_vk,
-        })
-    }
-
-    /// Verify only the compact wire form whose fixed first preprocessing opening
-    /// is absent. A non-elided proof is rejected even if it would otherwise verify.
-    pub fn verify_elided<CoreProofSC>(
-        &self,
-        reduce: &DTReduceProof<RootSC>,
-        core_vk: &SCStarkVerifyingKey<CoreProofSC>,
-    ) -> NativeRecursionAssemblyResult<()>
-    where
-        CoreProofSC: SCStarkGenericConfig<Val = F>,
-        CoreProofSC::Mlpcs: MlPCS<Commitment = MlCom<RecordingSC>>,
-    {
-        if !verifying_keys_equal(&self.l4_vk, &reduce.vk) {
-            return Err(validation("presented root vk differs from the frozen vk_L4"));
-        }
-
-        // `core_vk_statement_digest` assumes these externally supplied values
-        // have already been validated and uses `expect` internally. Validate
-        // them here so malformed bytes fail closed instead of trapping WASM.
-        dt_stark::global_d11::validate_global146_identity(&core_vk.global146_identity)
-            .map_err(|err| validation(format!("invalid core vk Global146 identity: {err}")))?;
-        dt_stark::global_d11::canonical_program_boundary_fields_v1::<F>(
-            &core_vk.program_boundary,
-        )
-        .map_err(|err| validation(format!("invalid core vk program boundary: {err:?}")))?;
-
-        let public = &reduce.proof.public_values;
-        let (global_start, global_end) = checked_native_root_public_interval(public)?;
-        let mut proof_for_verify = reduce.proof.clone();
-        let expected_batches = proof_for_verify.dimensions.len();
-        let restored = self
-            .l4_prover
-            .config()
-            .mlpcs()
-            .restore_elided_first_stacked_input_batch_pruned(
-                &mut proof_for_verify.opening_proof,
-                &self.l4_prep_data,
-                expected_batches,
-            )
-            .map_err(|err| validation(format!("restore root prep input opening: {err:?}")))?;
-        if !restored {
-            return Err(validation(
-                "root proof must use the elided L4 preprocessing-opening wire form",
-            ));
-        }
-
-        verify_recursion(
-            &self.l4_prover,
-            &self.l4_vk,
-            &SCMachineProof { shard_proofs: vec![proof_for_verify] },
-        )?;
-
-        let expected_dt_vk = core_vk_statement_digest(
-            &core_vk.commit,
-            core_vk.pc_start,
-            &core_vk.program_boundary,
-            &core_vk.global146_identity,
-        );
-        for idx in 0..DIGEST_SIZE {
-            if public[NATIVE_PV_DT_VK_DIGEST_START + idx] != expected_dt_vk[idx] {
-                return Err(validation("root dt_vk digest does not match the core vk"));
-            }
-        }
-        validate_native_root_global_interval(&core_vk.program_boundary, global_start, global_end)
-            .map_err(|error| validation(error.to_string()))?;
-        Ok(())
-    }
-}
-
 impl NativeLadderContext {
     pub fn build() -> NativeRecursionAssemblyResult<Self> {
         Self::build_uncached()
-    }
-
-    pub fn build_with_expected_l4_digest(
-        expected_l4_digest: [u32; DIGEST_SIZE],
-    ) -> NativeRecursionAssemblyResult<Self> {
-        let context = Self::build_uncached()?;
-        validate_expected_l4_digest(&context.l4_vk, expected_l4_digest)?;
-        Ok(context)
     }
 
     pub fn build_with_disk_cache(
@@ -1891,6 +1728,10 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
         })
     }
 
+    /// Removes the first stacked input-opening batch for explicit proof-size experiments.
+    ///
+    /// The resulting legacy proof is deliberately not accepted by [`Self::external_check`].
+    /// Product callers must publish the full proof returned by [`Self::prove_l4`].
     pub fn elide_root_prep_input_opening(
         &self,
         proof: &mut SCShardProof<RootSC>,
@@ -1928,22 +1769,6 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
         Ok(true)
     }
 
-    pub fn restore_root_prep_input_opening(
-        &self,
-        proof: &mut SCShardProof<RootSC>,
-    ) -> NativeRecursionAssemblyResult<bool> {
-        let expected_batches = proof.dimensions.len();
-        self.l4_prover
-            .config()
-            .mlpcs()
-            .restore_elided_first_stacked_input_batch_pruned(
-                &mut proof.opening_proof,
-                &self.l4_pk.data,
-                expected_batches,
-            )
-            .map_err(|err| validation(format!("restore root prep input opening: {err:?}")))
-    }
-
     /// Derives all four frozen layers (two-pass bootstrap for the canonical L2) and
     /// asserts per-layer setup determinism once.
     pub fn external_check<CoreProofSC>(
@@ -1955,22 +1780,27 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
         CoreProofSC: SCStarkGenericConfig<Val = F>,
         CoreProofSC::Mlpcs: MlPCS<Commitment = MlCom<RecordingSC>>,
     {
-        let phase = Instant::now();
+        let phase = std::time::Instant::now();
         if !verifying_keys_equal(&self.l4_vk, &reduce.vk) {
             return Err(validation("presented root vk differs from the frozen vk_L4"));
         }
         pcs::whir::profile::add_ms("verify.vk_typed_cmp_us", phase.elapsed().as_micros());
         let public = &reduce.proof.public_values;
         let (global_start, global_end) = checked_native_root_public_interval(public)?;
-        let phase = Instant::now();
-        let mut proof_for_verify = reduce.proof.clone();
-        pcs::whir::profile::add_ms("verify.proof_clone_us", phase.elapsed().as_micros());
-        let phase = Instant::now();
-        let restored_prep_input = self.restore_root_prep_input_opening(&mut proof_for_verify)?;
-        pcs::whir::profile::add_ms("verify.restore_prep_input_us", phase.elapsed().as_micros());
-        let machine_proof = SCMachineProof { shard_proofs: vec![proof_for_verify] };
-        let phase = Instant::now();
-        verify_recursion(&self.l4_prover, &self.l4_vk, &machine_proof)?;
+        let phase = std::time::Instant::now();
+        require_safe_root_polyair_shape(self.l4_prover.machine(), &self.l4_vk, reduce)?;
+        pcs::whir::profile::add_ms(
+            "verify.safe_root_shape_preflight_us",
+            phase.elapsed().as_micros(),
+        );
+        let phase = std::time::Instant::now();
+        require_full_root_input_opening(reduce)?;
+        pcs::whir::profile::add_ms(
+            "verify.full_input_opening_preflight_us",
+            phase.elapsed().as_micros(),
+        );
+        let phase = std::time::Instant::now();
+        verify_root_recursion_shard(self.l4_prover.machine(), &self.l4_vk, &reduce.proof)?;
         pcs::whir::profile::add_ms("verify.machine_verify_us", phase.elapsed().as_micros());
 
         // Instrumentation: log the per-component byte breakdown of the root proof
@@ -1982,7 +1812,7 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
                 "native_root_proof_slice commitment={} opened_values={} opening_proof={} \
 		sumcheck={} dims={} ordering={} public_values={} shard_total={} \
 		reduce_wire_total={} input_opening_batches={} \
-		restored_prep_input={}",
+		full_input_opening=true",
                 sz(bincode::serialize(&proof.commitment)),
                 sz(bincode::serialize(&proof.opened_values)),
                 sz(bincode::serialize(&proof.opening_proof)),
@@ -1993,7 +1823,6 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
                 sz(bincode::serialize(proof)),
                 sz(bincode::serialize(reduce)),
                 root_input_opening_batch_count(proof),
-                restored_prep_input,
             );
             let mut d_histogram = BTreeMap::<usize, usize>::new();
             for unipoly in &proof.sumcheck_proof.unipolys {
@@ -2002,7 +1831,7 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
             println!("native_root_d_histogram eval_len_counts={d_histogram:?}");
         }
 
-        let phase = Instant::now();
+        let phase = std::time::Instant::now();
         let expected_dt_vk = core_vk_statement_digest(
             &core_vk.commit,
             core_vk.pc_start,
@@ -2483,7 +2312,7 @@ impl<P: NativeProverProvider> NativeLadderContext<P> {
     }
 }
 
-fn checked_native_root_public_interval(
+pub(crate) fn checked_native_root_public_interval(
     public: &[F],
 ) -> NativeRecursionAssemblyResult<([[F; 11]; 3], [[F; 11]; 3])> {
     if public.len() != NATIVE_RECURSION_NUM_PV_ELTS {
@@ -2570,8 +2399,7 @@ mod tests {
         values.is_complete = F::one();
         let mut public = values.as_array();
         let digest = super::root_public_values_digest(&public);
-        public[super::NATIVE_PV_DIGEST_START..
-            super::NATIVE_PV_DIGEST_START + DIGEST_SIZE]
+        public[super::NATIVE_PV_DIGEST_START..super::NATIVE_PV_DIGEST_START + DIGEST_SIZE]
             .copy_from_slice(&digest);
         super::checked_native_root_public_interval(&public).unwrap();
 
@@ -2586,7 +2414,7 @@ mod tests {
 
     #[test]
     fn optimized_native_air_layouts_are_cache_schema_visible() {
-        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION, 28);
+        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION, 25);
         assert_eq!(
             (
                 NUM_CONSTRAINT_FOLD_COLS,
@@ -2961,8 +2789,8 @@ mod tests {
             }
         }
 
-        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION - 1, 27);
-        assert_eq!(crate::native_air_dt::NATIVE_AIR_REGISTRY_VERSION - 1, 15);
+        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION - 1, 24);
+        assert_eq!(crate::native_air_dt::NATIVE_AIR_REGISTRY_VERSION - 1, 12);
         assert!(rejected_field(
             "prior-schema",
             super::NATIVE_LADDER_CACHE_SCHEMA_VERSION - 1,
@@ -2982,9 +2810,9 @@ mod tests {
         )
         .contains("schema_version"));
 
-        assert_eq!(crate::symbolic_ir_dt::CONSTRAINT_PROGRAM_SCHEMA_VERSION, 14);
-        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION, 28);
-        assert_eq!(crate::native_air_dt::NATIVE_AIR_REGISTRY_VERSION, 16);
+        assert_eq!(crate::symbolic_ir_dt::CONSTRAINT_PROGRAM_SCHEMA_VERSION, 11);
+        assert_eq!(super::NATIVE_LADDER_CACHE_SCHEMA_VERSION, 25);
+        assert_eq!(crate::native_air_dt::NATIVE_AIR_REGISTRY_VERSION, 13);
     }
 
     #[test]

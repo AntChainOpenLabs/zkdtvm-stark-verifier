@@ -1,22 +1,5 @@
 use std::{cell::RefCell, collections::BTreeMap};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use std::time::Instant;
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy)]
-pub(crate) struct Instant;
-
-#[cfg(target_arch = "wasm32")]
-impl Instant {
-    pub(crate) fn now() -> Self {
-        Self
-    }
-
-    pub(crate) fn elapsed(self) -> std::time::Duration {
-        std::time::Duration::ZERO
-    }
-}
+use web_time::Instant;
 
 use p3_commit::{MmcsCommitObserver, MmcsCommitPhase};
 

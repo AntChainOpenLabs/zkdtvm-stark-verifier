@@ -32,6 +32,7 @@ pub mod system_dt;
 mod tracegen_backend;
 pub mod transcript_dt;
 pub mod validate;
+pub mod verifier_dt;
 pub mod whir_dt;
 
 pub use tracegen_backend::TracegenAuthorityHandle;

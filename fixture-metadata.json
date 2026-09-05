@@ -1,9 +1,29 @@
 {
-  "elf_sha256": "c6aab070fd6e8a2d4da77922daed5a39381c9f36fea2547e2e43c08c96ba5842",
-  "extension_degree": 5,
-  "fibonacci_n": 500,
+  "suite_commit": "efdc27dded74fcef61777c83e39aabdf5f88190c",
+  "suite_tree_commit": "3c5afb48b0e33fb4aca27ae5410d1ea9bcc3ae0a",
+  "program": "rsp-1.9.3",
+  "block": 24591262,
+  "elf_sha256": "bc7494a27ad7f1f3e99af2b699d19c54556f7dea0fa6273bc313297698cfcead",
   "field": "koalabear",
-  "program": "fibonacci-program",
+  "extension_degree": 5,
   "proof_config": "RootSC (SHA256)",
-  "suite_commit": "82a57cadf6921e4fb45181d98f1a5af0148ab491"
+  "wire_version": 11,
+  "l3_queries": 131,
+  "l4_round_queries": [
+    67,
+    36,
+    24
+  ],
+  "full_input_opening": true,
+  "path_pruning": true,
+  "proof_bytes": 264238,
+  "proof_sha256": "f052ac62b49524e8b47ad76f9450b8e89afd7a12563eebd7f9a64e1b91d73908",
+  "full_vk_bytes": 2368,
+  "full_vk_sha256": "52d89f5389e3a49cc5a73f7a187eb2a232504e5a6556fcf83048888571aa08f0",
+  "vk_digest_sha256": "3cd82da30b488c51987386ce7506c338954b8b2732e7f661cbf1560cf34f169d",
+  "proof_with_public_values_bytes": 265061,
+  "proof_with_public_values_sha256": "287d07732574c597a7080cabaa13545a6c3feb2ddc3b7a2998e3bf1cd2c4ef1c",
+  "artifact_schema_version": 1,
+  "artifact_bytes": 385869,
+  "artifact_sha256": "2255d5e801726279651f940cb2206715200c7f73d98cb0bf358e791c49ae51b8"
 }

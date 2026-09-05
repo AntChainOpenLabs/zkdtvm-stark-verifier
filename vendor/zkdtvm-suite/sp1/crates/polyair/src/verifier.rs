@@ -23,6 +23,7 @@ use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Pri
 use p3_matrix::dense::RowMajorMatrixView;
 use pcs::basefold::mlpcs::MlPCS;
 use std::{borrow::Borrow, marker::PhantomData, mem::take, slice};
+use web_time::Instant;
 pub struct Selectors<T> {
     pub is_first_row: T,
     pub is_last_row: T,
@@ -136,7 +137,7 @@ where
 
         // TODO: check LookupMultiplicityOverflow
 
-        let phase_pre_pcs = crate::Instant::now();
+        let phase_pre_pcs = Instant::now();
         let SCShardCommitment { main_commit, permutation_commit } = commitment;
         challenger.observe(main_commit.clone());
         let active_shape = derive_active_shape_v1(
@@ -250,7 +251,7 @@ where
         let main_opened_values: Vec<Vec<Challenge<SC>>> =
             opened_values.chips.iter().map(|chip| chip.main.to_vec_values()).collect();
         pcs::whir::profile::add_ms("verify.shard_pre_pcs_us", phase_pre_pcs.elapsed().as_micros());
-        let phase_pcs = crate::Instant::now();
+        let phase_pcs = Instant::now();
         let pcs_verification = if permutation_commit.is_some() {
             let permutation_opened_values: Vec<Vec<Challenge<SC>>> =
                 opened_values.chips.iter().map(|chip| chip.permutation.to_vec_values()).collect();
@@ -283,7 +284,7 @@ where
         };
 
         pcs::whir::profile::add_ms("verify.shard_pcs_us", phase_pcs.elapsed().as_micros());
-        let phase_constraints = crate::Instant::now();
+        let phase_constraints = Instant::now();
         let num_constraints = chips
             .iter()
             .map(|chip| {

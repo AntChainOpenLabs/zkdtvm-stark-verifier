@@ -3,6 +3,7 @@ use core::{
     cmp::Ordering,
 };
 use std::{borrow::Cow, collections::BTreeMap, ops::Range, sync::Arc};
+use web_time::Instant;
 
 use dt_stark::{
     air::{PairCol, PublicValues},
@@ -89,7 +90,6 @@ use crate::{
     },
     whir_dt::{WHIR_ROLE_COMPRESS, WHIR_ROLE_SHRINK},
 };
-use crate::Instant;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConstraintProgramTraceGenerator;

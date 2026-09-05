@@ -20,18 +20,6 @@ use serde::{Deserialize, Serialize};
 
 pub const DIGEST_SIZE: usize = 8;
 
-fn env_var(var: &str) -> Result<String, std::env::VarError> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = var;
-        Err(std::env::VarError::NotPresent)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var(var)
-    }
-}
-
 fn log_final_poly_len_from_env(default: usize) -> usize {
     log_final_poly_len_from_envs(&["WHIR_LOG_FINAL_POLY_LEN"], default)
 }
@@ -39,7 +27,7 @@ fn log_final_poly_len_from_env(default: usize) -> usize {
 fn log_final_poly_len_from_envs(vars: &[&str], default: usize) -> usize {
     vars.iter()
         .find_map(|var| {
-            env_var(var).ok().map(|value| {
+            std::env::var(var).ok().map(|value| {
                 value.parse::<usize>().unwrap_or_else(|_| panic!("{var} must be a usize"))
             })
         })
@@ -49,7 +37,7 @@ fn log_final_poly_len_from_envs(vars: &[&str], default: usize) -> usize {
 fn usize_from_envs(vars: &[&str], default: usize) -> usize {
     vars.iter()
         .find_map(|var| {
-            env_var(var).ok().map(|value| {
+            std::env::var(var).ok().map(|value| {
                 value.parse::<usize>().unwrap_or_else(|_| panic!("{var} must be a usize"))
             })
         })
@@ -58,7 +46,7 @@ fn usize_from_envs(vars: &[&str], default: usize) -> usize {
 
 // ──── Runtime JSON Configuration ────
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 pub struct StageJsonConfig {
     pub log_blowup: Option<usize>,
     pub num_queries: Option<usize>,
@@ -89,7 +77,7 @@ pub struct StageJsonConfig {
     pub path_pruning: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 pub struct WhirJsonConfig {
     pub num_skip_rounds: Option<usize>,
     pub chip_log_height_threshold: Option<usize>,
@@ -120,7 +108,7 @@ impl WhirJsonConfig {
             if var.is_empty() {
                 continue;
             }
-            if let Ok(value) = env_var(var) {
+            if let Ok(value) = std::env::var(var) {
                 match value.trim().to_ascii_lowercase().as_str() {
                     "1" | "true" | "on" | "yes" => return true,
                     "0" | "false" | "off" | "no" => return false,
@@ -150,7 +138,7 @@ impl WhirJsonConfig {
             if var.is_empty() {
                 continue;
             }
-            if let Ok(value) = env_var(var) {
+            if let Ok(value) = std::env::var(var) {
                 match value.trim().to_ascii_lowercase().as_str() {
                     "1" | "true" | "on" | "yes" => return true,
                     "0" | "false" | "off" | "no" => return false,
@@ -198,15 +186,91 @@ impl WhirJsonConfig {
 }
 
 static WHIR_CONFIG: std::sync::OnceLock<WhirJsonConfig> = std::sync::OnceLock::new();
+static EMBEDDED_WHIR_CONFIG_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
-/// The verifier-authoritative v0.8.0 KoalaBear/ext5 parameter profile.
-pub const WHIR_CONFIG_FILE: &str = "whir_config_koalabear_ext5.json";
-pub const WHIR_CONFIG_JSON: &str =
-    include_str!("../../../../../../whir_config_koalabear_ext5.json");
+/// Parses an embedded WHIR JSON artifact without consulting the filesystem or environment.
+pub fn parse_embedded_whir_json(contents: &str) -> Result<WhirJsonConfig, String> {
+    serde_json::from_str(contents).map_err(|error| format!("parse embedded WHIR JSON: {error}"))
+}
+
+/// Installs one already-parsed embedded WHIR configuration as the process authority.
+///
+/// Installing the same semantic configuration more than once is idempotent. Installing a
+/// different configuration after any WHIR configuration has become authoritative fails closed.
+/// Callers should validate product-specific pins before invoking this function so an invalid
+/// artifact never occupies the process-global slot.
+pub fn install_embedded_whir_config(
+    config: WhirJsonConfig,
+) -> Result<&'static WhirJsonConfig, String> {
+    if let Some(installed) = WHIR_CONFIG.get() {
+        if installed != &config {
+            return Err("embedded WHIR configuration differs from the installed process authority"
+                .to_string());
+        }
+        let _ = EMBEDDED_WHIR_CONFIG_INSTALLED.set(());
+        return Ok(installed);
+    }
+
+    if let Err(config) = WHIR_CONFIG.set(config) {
+        let installed = WHIR_CONFIG.get().ok_or_else(|| {
+            "embedded WHIR configuration installation raced without a winner".to_string()
+        })?;
+        if installed != &config {
+            return Err(
+                "embedded WHIR configuration differs from the concurrently installed process authority"
+                    .to_string(),
+            );
+        }
+    }
+    let _ = EMBEDDED_WHIR_CONFIG_INSTALLED.set(());
+    WHIR_CONFIG.get().ok_or_else(|| "embedded WHIR configuration was not installed".to_string())
+}
+
+/// Parses and installs an embedded WHIR JSON artifact without filesystem or environment access.
+pub fn install_embedded_whir_json(contents: &str) -> Result<&'static WhirJsonConfig, String> {
+    install_embedded_whir_config(parse_embedded_whir_json(contents)?)
+}
 
 pub fn whir_config() -> &'static WhirJsonConfig {
     WHIR_CONFIG.get_or_init(|| {
-        serde_json::from_str(WHIR_CONFIG_JSON).expect("embedded WHIR config must be valid")
+        // Select the WHIR parameter file matching the active challenge
+        // extension degree. WHIR_CONFIG_PATH can still override this.
+        #[cfg(not(feature = "ext5"))]
+        let default_name = "whir_config_koalabear_ext4.json";
+        #[cfg(not(feature = "ext5"))]
+        println!("chiyue, load whir_config_koalabear_ext4.json");
+
+        #[cfg(feature = "ext5")]
+        let default_name = "whir_config_koalabear_ext5.json";
+        #[cfg(feature = "ext5")]
+        println!("chiyue, load whir_config_koalabear_ext5.json");
+
+        let path = std::env::var("WHIR_CONFIG_PATH").unwrap_or_else(|_| {
+            // Walk up from the current directory to find the config file in an
+            // ancestor (typically the workspace root). This avoids silent
+            // fallback to defaults when `cargo run` sets CWD to a sub-crate.
+            if let Ok(mut dir) = std::env::current_dir() {
+                loop {
+                    let candidate = dir.join(default_name);
+                    if candidate.is_file() {
+                        return candidate.to_string_lossy().into_owned();
+                    }
+                    if !dir.pop() {
+                        break;
+                    }
+                }
+            }
+            default_name.to_string()
+        });
+        match std::fs::read_to_string(&path) {
+            Ok(contents) => {
+                let cfg: WhirJsonConfig = serde_json::from_str(&contents)
+                    .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"));
+                tracing::info!("Loaded WHIR config from {path}");
+                cfg
+            }
+            Err(_) => WhirJsonConfig::default(),
+        }
     })
 }
 
@@ -269,7 +333,7 @@ pub fn dt_fri_config() -> FriConfig<InnerChallengeMmcs> {
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
     let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress));
-    let num_queries = match env_var("FRI_QUERIES") {
+    let num_queries = match std::env::var("FRI_QUERIES") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 193,
     };
@@ -293,7 +357,7 @@ pub fn inner_fri_config() -> FriConfig<InnerChallengeMmcs> {
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
     let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress));
-    let num_queries = match env_var("FRI_QUERIES") {
+    let num_queries = match std::env::var("FRI_QUERIES") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 193,
     };
@@ -510,7 +574,7 @@ pub mod koala_bear_poseidon2 {
     fn cross_round_log_foldings_from_env(vars: &[&str], default: &[usize]) -> Vec<usize> {
         vars.iter()
             .find_map(|var| {
-                super::env_var(var).ok().map(|value| parse_cross_round_log_foldings(var, &value))
+                std::env::var(var).ok().map(|value| parse_cross_round_log_foldings(var, &value))
             })
             .unwrap_or_else(|| default.to_vec())
     }
@@ -518,7 +582,7 @@ pub mod koala_bear_poseidon2 {
     fn round_query_counts_from_env(vars: &[&str], default: &[usize]) -> Vec<usize> {
         vars.iter()
             .find_map(|var| {
-                super::env_var(var).ok().map(|value| parse_cross_round_log_foldings(var, &value))
+                std::env::var(var).ok().map(|value| parse_cross_round_log_foldings(var, &value))
             })
             .unwrap_or_else(|| default.to_vec())
     }
@@ -614,7 +678,7 @@ pub mod koala_bear_poseidon2 {
     ) -> FriConfig<FriMmcs> {
         let cfg = super::whir_config().stage(stage);
 
-        let num_queries = match super::env_var("FRI_QUERIES") {
+        let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
             Err(_) => cfg.num_queries.unwrap_or(default_num_queries),
         };
@@ -713,6 +777,121 @@ pub mod koala_bear_poseidon2 {
             WHIR_ROOT_SHRINK_NUM_COMMITTED_GROUPS,
             challenge_mmcs,
         )
+    }
+
+    fn embedded_root_stage(
+        config: &'static super::WhirJsonConfig,
+    ) -> Result<&'static super::StageJsonConfig, String> {
+        config
+            .num_skip_rounds
+            .ok_or_else(|| "embedded WHIR num_skip_rounds is absent".to_string())?;
+        config
+            .chip_log_height_threshold
+            .ok_or_else(|| "embedded WHIR chip_log_height_threshold is absent".to_string())?;
+        config
+            .use_algebraic_decomp
+            .ok_or_else(|| "embedded WHIR use_algebraic_decomp is absent".to_string())?;
+        for stage in ["core", "compress", "shrink"] {
+            let stage_config = match stage {
+                "core" => config.core.as_ref(),
+                "compress" => config.compress.as_ref(),
+                "shrink" => config.shrink.as_ref(),
+                _ => unreachable!(),
+            }
+            .ok_or_else(|| format!("embedded WHIR {stage} stage is absent"))?;
+            for (field, value) in [
+                ("log_blowup", stage_config.log_blowup),
+                ("num_queries", stage_config.num_queries),
+                ("grinding_bits_batching", stage_config.grinding_bits_batching),
+            ] {
+                match value {
+                    Some(value) if value > 0 => {}
+                    Some(_) => {
+                        return Err(format!("embedded WHIR {stage}.{field} must be positive"))
+                    }
+                    None => return Err(format!("embedded WHIR {stage}.{field} is absent")),
+                }
+            }
+        }
+        let root = config
+            .root_shrink
+            .as_ref()
+            .ok_or_else(|| "embedded WHIR root_shrink stage is absent".to_string())?;
+        let required = [
+            ("log_blowup", root.log_blowup),
+            ("grinding_bits_query", root.grinding_bits_query),
+            ("grinding_bits_batching", root.grinding_bits_batching),
+            ("grinding_bits_folding", root.grinding_bits_folding),
+            ("log_final_poly_len", root.log_final_poly_len),
+            ("num_committed_groups", root.num_committed_groups),
+            ("stack_log_height", root.stack_log_height),
+        ];
+        for (field, value) in required {
+            if value.is_none() {
+                return Err(format!("embedded WHIR root_shrink.{field} is absent"));
+            }
+        }
+        if root.log_blowup == Some(0) {
+            return Err("embedded WHIR root_shrink.log_blowup must be positive".to_string());
+        }
+        if root.num_queries == Some(0) {
+            return Err(
+                "embedded WHIR root_shrink.num_queries must be positive when present".to_string()
+            );
+        }
+        if root.num_committed_groups == Some(0) {
+            return Err(
+                "embedded WHIR root_shrink.num_committed_groups must be positive".to_string()
+            );
+        }
+        if root.stack_log_height == Some(0) {
+            return Err("embedded WHIR root_shrink.stack_log_height must be positive".to_string());
+        }
+        if root.stacking != Some(true) {
+            return Err("embedded WHIR root_shrink.stacking must be true".to_string());
+        }
+        if root.path_pruning.is_none() {
+            return Err("embedded WHIR root_shrink.path_pruning is absent".to_string());
+        }
+        let round_queries = root
+            .round_query_counts
+            .as_ref()
+            .ok_or_else(|| "embedded WHIR root_shrink.round_query_counts is absent".to_string())?;
+        if round_queries.iter().any(|queries| *queries == 0) {
+            return Err("embedded WHIR root_shrink round-query counts must be positive".to_string());
+        }
+        if round_queries.len() != root.num_committed_groups.expect("required above") {
+            return Err(
+                "embedded WHIR root_shrink round-query count does not match committed groups"
+                    .to_string(),
+            );
+        }
+        Ok(root)
+    }
+
+    fn build_embedded_root_sha256_fri_config(
+        root: &super::StageJsonConfig,
+    ) -> FriConfig<RootChallengeMmcs> {
+        let field_hash = RootFieldHash::new(Sha256);
+        let compress = Sha256Compress;
+        let challenge_mmcs = RootChallengeMmcs::new(RootValMmcs::new(field_hash, compress));
+        FriConfig {
+            log_blowup: root.log_blowup.expect("validated embedded root config"),
+            // The stacked path uses its per-round schedule. Keep the historical value for the
+            // otherwise inactive global-query field so the config remains structurally canonical.
+            num_queries: root.num_queries.unwrap_or(57),
+            grinding_bits_query: root.grinding_bits_query.expect("validated embedded root config"),
+            grinding_bits_batching: root
+                .grinding_bits_batching
+                .expect("validated embedded root config"),
+            grinding_bits_folding: root
+                .grinding_bits_folding
+                .expect("validated embedded root config"),
+            log_final_poly_len: root.log_final_poly_len.expect("validated embedded root config"),
+            cross_round_log_foldings: Vec::new(),
+            num_committed_groups: root.num_committed_groups,
+            mmcs: challenge_mmcs,
+        }
     }
 
     /// Core FRI config — UDR regime, no folding PoW needed.
@@ -819,7 +998,7 @@ pub mod koala_bear_poseidon2 {
     /// `stack_log_height` (for `stage`) > None (auto-stack).
     fn stack_log_height_hint(vars: &[&str], stage: &str) -> Option<usize> {
         let from_env = vars.iter().find_map(|var| {
-            super::env_var(var).ok().map(|value| {
+            std::env::var(var).ok().map(|value| {
                 value.parse::<usize>().unwrap_or_else(|_| panic!("{var} must be a valid usize"))
             })
         });
@@ -843,9 +1022,39 @@ pub mod koala_bear_poseidon2 {
         pub perm: Perm,
         pcs: RootPcs,
         mlpcs: RootMlpcs,
+        config_source: RootShrinkConfigSource,
+    }
+
+    #[derive(Clone, Copy)]
+    enum RootShrinkConfigSource {
+        Runtime,
+        Embedded(&'static super::WhirJsonConfig),
     }
 
     impl SCKoalaBearSha256Root {
+        fn root_shrink_from_embedded_config(
+            config: &'static super::WhirJsonConfig,
+        ) -> Result<Self, String> {
+            let root = embedded_root_stage(config)?;
+            let perm = my_perm();
+            let field_hash = RootFieldHash::new(Sha256);
+            let compress = Sha256Compress;
+            let val_mmcs = RootValMmcs::new(field_hash, compress);
+            let dft = Dft {};
+            let fri_config = build_embedded_root_sha256_fri_config(root);
+            let fri_config1 = build_embedded_root_sha256_fri_config(root);
+            let pcs = RootPcs::new(27, dft, val_mmcs.clone(), fri_config);
+            let mlpcs = RootMlpcs::from_config(
+                val_mmcs,
+                BasefoldConfig::new(fri_config1)
+                    .with_round_query_counts(
+                        root.round_query_counts.clone().expect("validated embedded root config"),
+                    )
+                    .with_path_pruning(root.path_pruning.expect("validated embedded root config")),
+            );
+            Ok(Self { pcs, mlpcs, perm, config_source: RootShrinkConfigSource::Embedded(config) })
+        }
+
         #[must_use]
         pub fn root_shrink() -> Self {
             let perm = my_perm();
@@ -870,29 +1079,59 @@ pub mod koala_bear_poseidon2 {
                     WHIR_ROOT_SHRINK_ROUND_QUERY_COUNTS,
                 ),
             );
-            Self { pcs, mlpcs, perm }
+            Self { pcs, mlpcs, perm, config_source: RootShrinkConfigSource::Runtime }
+        }
+
+        /// Constructs the root verifier configuration exclusively from the installed embedded
+        /// WHIR artifact. This path never resolves environment overrides or reads the filesystem.
+        pub fn root_shrink_from_installed_embedded() -> Result<Self, String> {
+            if super::EMBEDDED_WHIR_CONFIG_INSTALLED.get().is_none() {
+                return Err("no embedded WHIR configuration has been installed".to_string());
+            }
+            let config = super::WHIR_CONFIG
+                .get()
+                .ok_or_else(|| "embedded WHIR configuration marker has no config".to_string())?;
+            Self::root_shrink_from_embedded_config(config)
         }
 
         /// Whether root_shrink commits via the WHIR stacking path.
         pub fn whir_stacking_enabled(&self) -> bool {
-            super::whir_config().stacking_enabled("root_shrink")
+            match self.config_source {
+                RootShrinkConfigSource::Runtime => {
+                    super::whir_config().stacking_enabled("root_shrink")
+                }
+                RootShrinkConfigSource::Embedded(config) => {
+                    config.stage("root_shrink").stacking == Some(true)
+                }
+            }
         }
 
         pub fn whir_stack_log_height_hint(&self) -> Option<usize> {
-            stack_log_height_hint(
-                &[
-                    "WHIR_ROOT_SHRINK_STACK_LOG_HEIGHT",
-                    "WHIR_SHRINK_STACK_LOG_HEIGHT",
-                    "WHIR_STACK_LOG_HEIGHT",
-                ],
-                "root_shrink",
-            )
+            match self.config_source {
+                RootShrinkConfigSource::Runtime => stack_log_height_hint(
+                    &[
+                        "WHIR_ROOT_SHRINK_STACK_LOG_HEIGHT",
+                        "WHIR_SHRINK_STACK_LOG_HEIGHT",
+                        "WHIR_STACK_LOG_HEIGHT",
+                    ],
+                    "root_shrink",
+                ),
+                RootShrinkConfigSource::Embedded(config) => {
+                    config.stage("root_shrink").stack_log_height
+                }
+            }
         }
     }
 
     impl Clone for SCKoalaBearSha256Root {
         fn clone(&self) -> Self {
-            Self::root_shrink()
+            match self.config_source {
+                RootShrinkConfigSource::Runtime => Self::root_shrink(),
+                RootShrinkConfigSource::Embedded(config) => {
+                    Self::root_shrink_from_embedded_config(config)
+                        .expect("installed embedded root config was already validated")
+                }
+            }
         }
     }
 

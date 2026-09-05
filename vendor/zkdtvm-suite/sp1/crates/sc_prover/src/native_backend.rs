@@ -4,10 +4,9 @@
 //! Note: no AIR/machine content lives here; changing the machine re-keys every
 //! verifying key (refresh the pinned vk digest below when that happens).
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
 use std::{
     collections::BTreeMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{sync_channel, TrySendError},
@@ -15,11 +14,11 @@ use std::{
     },
 };
 
+use crate::Instant;
+
 use dt_core_machine::reduce::DTReduceProof;
 use dt_stark::{
-    koalabear_poseidon2::{
-        whir_config, StageJsonConfig, WhirJsonConfig, WHIR_CONFIG_FILE, WHIR_CONFIG_JSON,
-    },
+    koalabear_poseidon2::{whir_config, StageJsonConfig, WhirJsonConfig},
     sumcheck::{
         config::SCStarkGenericConfig,
         keys::SCStarkVerifyingKey,
@@ -29,19 +28,19 @@ use dt_stark::{
 };
 use native_recursion::{
     compress_dt::{
-        build_ladder_with_provider, verifying_keys_equal, NativeCompressNodeStat,
+        build_ladder_with_provider, root_vk_digest, verifying_keys_equal, NativeCompressNodeStat,
         NativeLadderContext, NativeRecursionRequest, NativeReduceChild,
     },
     machine_dt::{CpuNativeProver, NativeProverProvider},
     prelude::{BuildingRecord, F, SC},
     statement_dt::core_vk_statement_digest,
+    verifier_dt::{NativeRootVerifierArtifactV1, NATIVE_ROOT_VK_FROZEN_DIGEST_V1},
 };
+use p3_field::PrimeField32;
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::{
-    tree_plan, CoreSC, DTPublicValues, DTRecursionProverError, DTVerifyingKey, Instant, RootSC,
-};
+use crate::{tree_plan, CoreSC, DTPublicValues, DTRecursionProverError, DTVerifyingKey, RootSC};
 
 /// Maximum node arity the scheduler may use — the machine's keyed capacity,
 /// re-exported from the crate that owns the reduce programs.
@@ -70,11 +69,22 @@ pub const NATIVE_ROOT_SHRINK_STACK_LOG_HEIGHT: usize = 18;
 /// Re-pinned 2026-07-29 after the accepted remaining-native-AIR epoch reached
 /// program schema 3, registry 5, and cache schema 17. Two fresh repository-
 /// external cache builds produced this same root digest.
-pub const VK_L4_FROZEN_DIGEST: [u32; 8] =
-    [749119521, 1634966845, 1728650179, 1888382305, 1621871324, 63606038, 334247789, 232068777];
+pub const VK_L4_FROZEN_DIGEST: [u32; 8] = NATIVE_ROOT_VK_FROZEN_DIGEST_V1;
 
 fn runtime(err: impl std::fmt::Display) -> DTRecursionProverError {
     DTRecursionProverError::RuntimeError(err.to_string())
+}
+
+fn validate_frozen_l4_digest(
+    vk: &SCStarkVerifyingKey<RootSC>,
+) -> Result<(), DTRecursionProverError> {
+    let actual = root_vk_digest(vk).map(|limb| limb.as_canonical_u32());
+    if actual != VK_L4_FROZEN_DIGEST {
+        return Err(runtime(format!(
+            "vk_L4 digest mismatch: actual={actual:?} expected={VK_L4_FROZEN_DIGEST:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn stable_hash_hex(bytes: &[u8]) -> String {
@@ -86,34 +96,18 @@ fn stable_hash_hex(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-fn env_var(name: &str) -> Result<String, std::env::VarError> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = name;
-        Err(std::env::VarError::NotPresent)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var(name)
-    }
-}
-
 // ───────────────────────── fail-closed config authority ─────────────────────────
 
 /// The env overrides that can silently repoint WHIR parameters. The SDK product route
 /// rejects ALL of them: diagnostic runs belong to the harness bins (which drive the
 /// ladder library directly), never to `DTProver::compress`.
-#[cfg(not(target_arch = "wasm32"))]
 fn rejected_env_overrides() -> Vec<String> {
     std::env::vars()
         .map(|(key, _)| key)
-        .filter(|key| key.starts_with("WHIR_") || key == "DT_USE_PATH_PRUNING")
+        .filter(|key| {
+            key.starts_with("WHIR_") || key == "FRI_QUERIES" || key == "DT_USE_PATH_PRUNING"
+        })
         .collect()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn rejected_env_overrides() -> Vec<String> {
-    Vec::new()
 }
 
 /// Strict re-read of the suite JSON: resolving the same
@@ -123,12 +117,29 @@ fn rejected_env_overrides() -> Vec<String> {
 struct ConfigAuthority {
     config: WhirJsonConfig,
     hash: String,
+    contents: String,
 }
 
 fn read_config_authority() -> Result<ConfigAuthority, String> {
-    let config = serde_json::from_str(WHIR_CONFIG_JSON)
-        .map_err(|e| format!("parse embedded {WHIR_CONFIG_FILE}: {e}"))?;
-    Ok(ConfigAuthority { config, hash: stable_hash_hex(WHIR_CONFIG_JSON.as_bytes()) })
+    let name = "whir_config_koalabear_ext5.json";
+    let mut dir = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+    let path = loop {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            break candidate;
+        }
+        if !dir.pop() {
+            return Err(format!(
+                "config authority {name} not found in any ancestor of the working directory; \
+                 the native backend refuses to run on compiled-in defaults"
+            ));
+        }
+    };
+    let contents =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let config =
+        serde_json::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))?;
+    Ok(ConfigAuthority { config, hash: stable_hash_hex(contents.as_bytes()), contents })
 }
 
 fn require<T: Copy>(stage: &str, field: &str, value: Option<T>) -> Result<T, String> {
@@ -269,7 +280,6 @@ fn assert_config_authority() -> Result<String, String> {
     Ok(authority_hash)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn native_ladder_cache_dir_from_override(path: Option<std::ffi::OsString>) -> PathBuf {
     if let Some(path) = path.filter(|path| !path.is_empty()) {
         return PathBuf::from(path);
@@ -281,7 +291,6 @@ fn native_ladder_cache_dir_from_override(path: Option<std::ffi::OsString>) -> Pa
         .join("native-recursion")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn native_ladder_cache_dir() -> PathBuf {
     native_ladder_cache_dir_from_override(std::env::var_os("DT_NATIVE_RECURSION_CACHE_DIR"))
 }
@@ -297,7 +306,7 @@ fn available_parallelism() -> usize {
 /// production override cannot silently select a different tree.
 pub fn tree_plan_worker_hint() -> Result<usize, DTRecursionProverError> {
     let default_workers = available_parallelism().min(2);
-    let workers = match env_var("DT_NATIVE_RECURSION_EARLY_LIFT_WORKERS") {
+    let workers = match std::env::var("DT_NATIVE_RECURSION_EARLY_LIFT_WORKERS") {
         Ok(value) => value.parse::<usize>().ok().filter(|value| *value > 0).ok_or_else(|| {
             runtime(format!(
                 "DT_NATIVE_RECURSION_EARLY_LIFT_WORKERS must be a positive integer, got {value:?}"
@@ -1080,6 +1089,8 @@ pub fn new_native_backend_with_provider<P: NativeProverProvider>(
     let _config_hash = assert_config_authority().map_err(runtime)?;
     let ladder =
         build_ladder_with_provider::<P>().map_err(|err| runtime(format!("ladder build: {err}")))?;
+    // This uncached provider path does not pass through the disk-cache admission gate.
+    validate_frozen_l4_digest(ladder.root_vk())?;
     Ok(NativeRecursionBackend { ladder, last_report: Mutex::new(None) })
 }
 
@@ -1094,27 +1105,55 @@ impl NativeRecursionBackend {
             )));
         }
         let config_hash = assert_config_authority().map_err(runtime)?;
-        #[cfg(target_arch = "wasm32")]
-        let ladder = NativeLadderContext::build_with_expected_l4_digest(VK_L4_FROZEN_DIGEST)
-            .map_err(|err| runtime(format!("ladder build: {err}")))?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let ladder = {
-            let cache_dir = native_ladder_cache_dir();
-            NativeLadderContext::build_with_disk_cache(
-                &cache_dir,
-                &config_hash,
-                VK_L4_FROZEN_DIGEST,
-            )
-            .map_err(|err| runtime(format!("ladder build: {err}")))?
-        };
+        let cache_dir = native_ladder_cache_dir();
+        let ladder = NativeLadderContext::build_with_disk_cache(
+            &cache_dir,
+            &config_hash,
+            VK_L4_FROZEN_DIGEST,
+        )
+        .map_err(|err| runtime(format!("ladder build: {err}")))?;
         Ok(Self { ladder, last_report: Mutex::new(None) })
     }
 }
 
 impl<P: NativeProverProvider> NativeRecursionBackend<P> {
+    /// Exports the minimal, application-bound trust root consumed by the browser verifier.
+    ///
+    /// The returned value contains no proving key or MMCS prover data. Callers must serialize it
+    /// into a release artifact and compile those exact bytes into the WASM verifier; it is not a
+    /// runtime input protocol.
+    pub fn root_verifier_artifact(
+        &self,
+        core_vk: &SCStarkVerifyingKey<CoreSC>,
+    ) -> Result<NativeRootVerifierArtifactV1, DTRecursionProverError> {
+        // Re-run the product authority gate at export time so an environment change after backend
+        // construction cannot produce an artifact for a different configuration.
+        validate_frozen_l4_digest(self.ladder.root_vk())?;
+        let authority_hash = assert_config_authority().map_err(runtime)?;
+        let authority = read_config_authority().map_err(runtime)?;
+        if authority.hash != authority_hash {
+            return Err(runtime(
+                "WHIR config authority changed while exporting the browser verifier artifact",
+            ));
+        }
+        let expected_core_statement_digest = core_vk_statement_digest(
+            &core_vk.commit,
+            core_vk.pc_start,
+            &core_vk.program_boundary,
+            &core_vk.global146_identity,
+        );
+        Ok(NativeRootVerifierArtifactV1::new(
+            authority.contents,
+            self.ladder.l4_program.clone(),
+            self.ladder.l4_vk.clone(),
+            expected_core_statement_digest,
+            core_vk.program_boundary.clone(),
+        ))
+    }
+
     pub(crate) fn pipeline_options(&self) -> Result<NativePipelineOptions, DTRecursionProverError> {
         fn positive_env(name: &str, default: usize) -> Result<usize, DTRecursionProverError> {
-            match env_var(name) {
+            match std::env::var(name) {
                 Ok(value) => {
                     value.parse::<usize>().ok().filter(|value| *value > 0).ok_or_else(|| {
                         runtime(format!("{name} must be a positive integer, got {value:?}"))
@@ -1127,7 +1166,7 @@ impl<P: NativeProverProvider> NativeRecursionBackend<P> {
 
         let default_workers = available_parallelism().min(NATIVE_MAX_NODE_ARITY);
         // GPU mode: force serial(多线程 CUDA context 死锁). Env var 可覆盖。
-        let force_serial = env_var("DT_NATIVE_SERIAL").map_or(false, |v| v == "1");
+        let force_serial = std::env::var("DT_NATIVE_SERIAL").map_or(false, |v| v == "1");
         if force_serial {
             return Ok(NativePipelineOptions {
                 recorder_workers: 1,
@@ -2069,13 +2108,11 @@ impl<P: NativeProverProvider> NativeRecursionBackend<P> {
         report.node_stats.extend(stats);
 
         let root_postprocess_start = Instant::now();
-        let mut reduce_proof =
+        let reduce_proof =
             l4.shard_proofs.into_iter().next().ok_or_else(|| runtime("empty L4 proof"))?;
-        if self.ladder.elide_root_prep_input_opening(&mut reduce_proof).map_err(runtime)? {
-            if native_recursion::debug_prints_enabled() {
-                println!("native_root_prep_input_elision applied");
-            }
-        }
+        // Browser transport keeps the first preprocessed-input opening so the final proof is
+        // self-contained. Native product verification is full-only and never reconstructs an
+        // omitted batch from prover-side state.
         d21_duplicate_census_root("root", &reduce_proof);
         let reduce = DTReduceProof { vk: self.ladder.root_vk().clone(), proof: reduce_proof };
         record_native_phase(
@@ -2128,7 +2165,7 @@ impl<P: NativeProverProvider> NativeRecursionBackend<P> {
 macro_rules! d21_duplicate_census_impl {
     ($fn_name:ident, $cfg:ty) => {
 fn $fn_name(label: &str, proof: &SCShardProof<$cfg>) {
-    if env_var("DT_NATIVE_D21_CENSUS").is_err() {
+    if std::env::var("DT_NATIVE_D21_CENSUS").is_err() {
         return;
     }
     use std::collections::HashMap;

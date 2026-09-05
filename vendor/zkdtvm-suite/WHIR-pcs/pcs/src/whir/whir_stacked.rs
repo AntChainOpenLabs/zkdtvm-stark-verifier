@@ -13,6 +13,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::{Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_bits_len;
+use web_time::Instant;
 
 use crate::utils::eqpoly::EqPolynomial;
 use crate::utils::math::compute_dotproduct_mix;
@@ -1379,7 +1380,7 @@ where
         let mut poly_iter = sumcheck_transcript.uni_polys.iter();
         let mut consumed_rounds = 0usize;
 
-        let phase_rounds = super::profile::Instant::now();
+        let phase_rounds = Instant::now();
         for (round_idx, round) in round_schedule.iter().enumerate() {
             if round.start_round != stack_log_height - consumed_rounds {
                 return Err(WhirError::InvalidInputError);
@@ -1447,7 +1448,7 @@ where
             let query_points = (0..round_config.num_queries)
                 .map(|_| challenger.sample_bits(current_codeword_log))
                 .collect::<Vec<_>>();
-        let phase = super::profile::Instant::now();
+            let phase = Instant::now();
             let opened_rows_by_query = if let Some(pruned) = pruned_iopp {
                 self.verify_iopp_rows_pruned(
                     &iopp_oracles[round_idx],
@@ -1481,7 +1482,7 @@ where
             };
             profile::add_ms("verify.whir_iopp_rows_us", phase.elapsed().as_micros());
 
-            let phase = super::profile::Instant::now();
+            let phase = Instant::now();
             let input_leaf_sums = if round_idx == 0 {
                 if let Some(pruned) = input_openings.pruned.as_ref() {
                     self.verify_stacked_input_pruned(
@@ -1540,7 +1541,7 @@ where
                 });
             }
 
-            let phase = super::profile::Instant::now();
+            let phase = Instant::now();
             let mut gamma_power = gamma * gamma;
             for (query_idx, (&query_point, opened_row)) in query_points
                 .iter()
@@ -1588,7 +1589,7 @@ where
             return Err(WhirError::InvalidInputError);
         }
 
-            let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         let final_acc = Self::symbolic_final_accumulator(final_poly, &weight_terms)?;
         profile::add_ms("verify.whir_final_acc_us", phase.elapsed().as_micros());
         if final_acc != current_claim {
@@ -1641,12 +1642,12 @@ where
             return Err(WhirError::InvalidInputError);
         }
 
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         let full_opening_point =
             self.extend_stacked_opening_point(opening_point, stack_log_height, challenger)?;
         profile::add_ms("verify.whir_extend_point_us", phase.elapsed().as_micros());
 
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         let layouts = matrices_size_batch
             .iter()
             .map(|dims| {
@@ -1658,7 +1659,7 @@ where
 
         // ── Stacking reduction verification ──
         // 1. Absorb opened_values
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         for batch_values in opened_values_batch.iter() {
             for mat_values in batch_values.iter() {
                 for v in mat_values.iter() {
@@ -1678,7 +1679,7 @@ where
             .collect();
 
         // 3. Compute T = Σ λ^i · original_claim_i
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         let mut target = EF::zero();
         let mut lambda_power = EF::one();
         for ((dims, values), (layout, &uses_flat)) in matrices_size_batch
@@ -1711,7 +1712,7 @@ where
         if reduction.sumcheck.uni_polys.len() != stack_log_height {
             return Err(WhirError::InvalidInputError);
         }
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         let mut reduction_claim = target;
         let mut u = Vec::with_capacity(stack_log_height);
         for uni_poly in &reduction.sumcheck.uni_polys {
@@ -1734,7 +1735,7 @@ where
         );
 
         // 5. Compute q_c = Q_c(u) and verify final claim
-        let phase = super::profile::Instant::now();
+        let phase = Instant::now();
         lambda_power = EF::one();
         let total_stacked_width: usize = layouts.iter().map(|l| l.width).sum();
         let mut q_at_u_all: Vec<EF> = Vec::with_capacity(total_stacked_width);

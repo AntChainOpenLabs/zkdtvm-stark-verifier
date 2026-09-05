@@ -4,6 +4,8 @@ use std::{
     fmt,
 };
 
+use crate::Instant;
+
 use dt_core_machine::{
     riscv::riscv_polyair::RiscvPolyAir,
     utils::prove_polyair::{POLYAIR_CHIP_LOG_HEIGHT_THRESHOLD, POLYAIR_NUM_SKIP_ROUNDS},
@@ -75,7 +77,6 @@ use crate::{
         attach_whir_tracegen_materials, materialize_whir_tracegen_sources,
         prepare_whir_tracegen_materials, whir_bus_residual_report,
     },
-    Instant,
 };
 
 pub use crate::native_air_dt::NativeRecursionAir;
@@ -242,9 +243,24 @@ pub(crate) fn native_root_shrink_prover(
 pub(crate) fn native_root_shrink_prover_with_provider<P: NativeProverProvider>(
     program: &RecursionNativeProgram<F>,
 ) -> NativeRecursionAssemblyResult<NativeRootProver<P>> {
+    let machine = native_root_verifier_machine(program, RootSC::default())?;
+    print_chip_batch_profile("root_shrink", machine.chips());
+    Ok(<<P as NativeProverProvider>::RootProver as SCMachineProver<
+        RootSC,
+        NativeRecursionAir,
+        D_EF,
+    >>::new(machine))
+}
+
+/// Builds the canonical provider-free L4 verifier machine from its frozen program and an explicit
+/// root proof configuration. No proving key, prover provider, thread pool, or GPU resource is
+/// constructed by this path.
+pub fn native_root_verifier_machine(
+    program: &RecursionNativeProgram<F>,
+    config: RootSC,
+) -> NativeRecursionAssemblyResult<NativeRootMachine> {
     let params = program.layer()?.params();
     validate_program_matches_layer(program, params)?;
-    let config = RootSC::default();
     validate_proof_config_for_layer(&config, params)?;
     let chips: Vec<polyair::Chip<NativeRecursionAir, F, D_EF>> = NativeRecursionAir::all(program)?
         .into_iter()
@@ -255,13 +271,7 @@ pub(crate) fn native_root_shrink_prover_with_provider<P: NativeProverProvider>(
             )
         })
         .collect();
-    print_chip_batch_profile("root_shrink", &chips);
-    let machine = polyair::SCStarkMachine::new(config, chips, NATIVE_RECURSION_NUM_PV_ELTS, false);
-    Ok(<<P as NativeProverProvider>::RootProver as SCMachineProver<
-        RootSC,
-        NativeRecursionAir,
-        D_EF,
-    >>::new(machine))
+    Ok(polyair::SCStarkMachine::new(config, chips, NATIVE_RECURSION_NUM_PV_ELTS, false))
 }
 
 /// Prints one per-chip profile line per machine construction: degree, logup batch,
@@ -1051,7 +1061,7 @@ where
     // chip trace per prove. Diffing two identical runs on these lines localizes
     // any run-to-run trace nondeterminism to a (machine, chip) before the
     // transcript ever sees it.
-    if crate::env_var("DT_NATIVE_D12_TRACE_DIGEST").is_ok() {
+    if std::env::var("DT_NATIVE_D12_TRACE_DIGEST").is_ok() {
         for (name, trace) in traces.iter() {
             let mut acc: u64 = 0xcbf29ce484222325;
             for value in &trace.main.values {
@@ -1160,9 +1170,21 @@ where
     PROV: SCMachineProver<C, NativeRecursionAir, D_EF>,
     C::MlChallenger: Clone,
 {
-    let mut challenger = prover.config().mlchallenger();
-    prover
-        .machine()
+    verify_recursion_machine(prover.machine(), vk, proof)
+}
+
+/// Verifies one native-recursion machine proof without constructing or retaining a prover.
+pub fn verify_recursion_machine<C>(
+    machine: &polyair::SCStarkMachine<C, NativeRecursionAir, D_EF>,
+    vk: &SCStarkVerifyingKey<C>,
+    proof: &SCMachineProof<C>,
+) -> NativeRecursionAssemblyResult<()>
+where
+    C: SCStarkGenericConfig + StarkGenericConfig<Val = F, Challenge = EF>,
+    C::MlChallenger: Clone,
+{
+    let mut challenger = machine.config().mlchallenger();
+    machine
         .verify(
             vk,
             proof,
@@ -1171,6 +1193,55 @@ where
             NATIVE_RECURSION_CHIP_LOG_HEIGHT_THRESHOLD,
         )
         .map_err(|err| NativeRecursionAssemblyError::Verify(err.to_string()))
+}
+
+/// Verifies the single shard of a terminal L4 proof by reference.
+///
+/// This is the allocation-free companion to [`verify_recursion_machine`] for the root product:
+/// it performs the same VK observation, chip selection, and PolyAir shard verification without
+/// first cloning the (potentially large) shard into an [`SCMachineProof`]. Root machines never
+/// carry the inter-shard Global bus; the statement-level Global interval is checked separately by
+/// the native root verifier.
+pub fn verify_root_recursion_shard(
+    machine: &NativeRootMachine,
+    vk: &SCStarkVerifyingKey<RootSC>,
+    shard: &SCShardProof<RootSC>,
+) -> NativeRecursionAssemblyResult<()> {
+    if machine.contains_global_bus {
+        return Err(NativeRecursionAssemblyError::Verify(
+            "terminal root verifier machine unexpectedly contains the Global bus".to_string(),
+        ));
+    }
+    if machine.global_boundary_registry != vk.owner_registry ||
+        vk.owner_registry.validate().is_err()
+    {
+        return Err(NativeRecursionAssemblyError::Verify(
+            "root machine and verification key owner registries differ".to_string(),
+        ));
+    }
+    if shard.public_values.len() < machine.num_pv_elts() {
+        return Err(NativeRecursionAssemblyError::Verify(format!(
+            "root shard has {} public values, expected at least {}",
+            shard.public_values.len(),
+            machine.num_pv_elts(),
+        )));
+    }
+
+    let mut challenger = machine.config().mlchallenger();
+    vk.observe_into(&mut challenger);
+    challenger.observe_slice(&shard.public_values[..machine.num_pv_elts()]);
+    let chips = machine.shard_chips_ordered(&shard.chip_ordering).collect::<Vec<_>>();
+    polyair::verifier::Verifier::<RootSC, NativeRecursionAir, D_EF>::verify_shard(
+        machine.config(),
+        vk,
+        &chips,
+        &mut challenger,
+        shard,
+        NATIVE_RECURSION_NUM_SKIP_ROUNDS,
+        NATIVE_RECURSION_CHIP_LOG_HEIGHT_THRESHOLD,
+        false,
+    )
+    .map_err(|err| NativeRecursionAssemblyError::Verify(err.to_string()))
 }
 
 pub fn core_recording_machine() -> CoreRecordingMachine {
@@ -2375,7 +2446,7 @@ pub(crate) fn run_final_residuals() -> bool {
 }
 
 fn env_flag(name: &str) -> bool {
-    match crate::env_var(name) {
+    match std::env::var(name) {
         Ok(value) => value != "0" && !value.eq_ignore_ascii_case("false"),
         Err(_) => false,
     }

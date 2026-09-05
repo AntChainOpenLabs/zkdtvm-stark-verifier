@@ -1,85 +1,187 @@
-//! End-to-end verification test using fixture files.
-//!
-//! Loads `proof.bin` and `vk-full.bin` from the project root and runs
-//! the full compressed-proof verification pipeline, mirroring the CLI binary.
-//!
-//! If fixture files are not present the test is silently skipped so that
-//! `cargo test` always passes in environments where fixtures have not yet
-//! been generated (they require 32GB+ RAM).
-
 use std::path::PathBuf;
 
-use zkdtvm_stark_verifier::{verify_compressed_bytes, DTVerifyingKey, HashableKey, DIGEST_SIZE};
+use dt_core_executor::deserialize_reduce_proof_bounded;
+use p3_field::AbstractField;
+use zkdtvm_stark_verifier::{
+    deserialize_vk_bytes, verify_compressed_bytes, CompressedVerifier, RootSC, SCField,
+    L4_VERIFIER_ARTIFACT, MAX_PROOF_BYTES, MAX_VK_BYTES,
+};
 
-fn project_root() -> PathBuf {
-    // crates/verify -> ../.. = project root
+fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn has_fixtures() -> bool {
-    let root = project_root();
-    root.join("proof.bin").exists() && root.join("vk-full.bin").exists()
+fn fixtures() -> (Vec<u8>, Vec<u8>) {
+    (
+        std::fs::read(root().join("proof.bin")).expect("required q131 proof fixture"),
+        std::fs::read(root().join("vk-full.bin")).expect("required full VK fixture"),
+    )
 }
 
-fn load_proof_bytes() -> Vec<u8> {
-    std::fs::read(project_root().join("proof.bin")).unwrap()
+#[test]
+fn q131_full_proof_verifies_repeatedly_without_setup() {
+    let (proof, vk) = fixtures();
+    assert_eq!(proof.len(), 264_238);
+    let reduce = deserialize_reduce_proof_bounded::<RootSC>(&proof).unwrap();
+    let opening = reduce
+        .proof
+        .opening_proof
+        .query_openings
+        .pruned
+        .as_ref()
+        .unwrap();
+    assert_eq!(opening.round_pruned.len(), 3);
+    assert_eq!(opening.round_opened_values.len(), 3);
+    assert_eq!(opening.query_to_unique_slot.len(), 3);
+    let verifier = CompressedVerifier::new().unwrap();
+    for _ in 0..3 {
+        verifier.verify_compressed_bytes(&proof, &vk).unwrap();
+    }
+    verify_compressed_bytes(&proof, &vk).unwrap();
 }
 
-fn load_vk_bytes() -> Vec<u8> {
-    std::fs::read(project_root().join("vk-full.bin")).unwrap()
-}
+#[test]
+fn rejects_elided_and_tampered_full_proofs_then_reuses_runtime() {
+    let (proof, vk) = fixtures();
+    let verifier = CompressedVerifier::new().unwrap();
+    let original = deserialize_reduce_proof_bounded::<RootSC>(&proof).unwrap();
+    let mut elided = original.clone();
+    let pruned = elided
+        .proof
+        .opening_proof
+        .query_openings
+        .pruned
+        .as_mut()
+        .unwrap();
+    pruned.round_pruned.remove(0);
+    pruned.round_opened_values.remove(0);
+    pruned.query_to_unique_slot.remove(0);
+    let elided_bytes = bincode::serialize(&elided).unwrap();
+    let error = verifier
+        .verify_compressed_bytes(&elided_bytes, &vk)
+        .unwrap_err();
+    assert!(
+        error.contains("does not carry every input-opening batch"),
+        "{error}"
+    );
 
-fn load_vk_digest_u32() -> [u32; DIGEST_SIZE] {
-    let bytes = load_vk_bytes();
-    match bincode::deserialize::<[u32; DIGEST_SIZE]>(&bytes) {
-        Ok(digest) => digest,
-        Err(_) => {
-            let vk: DTVerifyingKey = bincode::deserialize(&bytes).unwrap();
-            vk.hash_u32()
+    let mut changed_public = original.clone();
+    changed_public.proof.public_values[0] += SCField::one();
+    assert!(verifier
+        .verify_compressed_bytes(&bincode::serialize(&changed_public).unwrap(), &vk)
+        .is_err());
+
+    let mut changed_root_vk = original.clone();
+    changed_root_vk.vk.pc_start += SCField::one();
+    assert!(verifier
+        .verify_compressed_bytes(&bincode::serialize(&changed_root_vk).unwrap(), &vk)
+        .is_err());
+
+    let mut changed_sumcheck = original.clone();
+    changed_sumcheck.proof.sumcheck_proof.unipolys[0].evals[0] +=
+        native_recursion::config::EF::one();
+    assert!(verifier
+        .verify_compressed_bytes(&bincode::serialize(&changed_sumcheck).unwrap(), &vk)
+        .is_err());
+
+    let mut changed_merkle = original.clone();
+    let pruned = changed_merkle
+        .proof
+        .opening_proof
+        .query_openings
+        .pruned
+        .as_mut()
+        .unwrap();
+    pruned.query_to_unique_slot[0][0] = u32::MAX as _;
+    assert!(verifier
+        .verify_compressed_bytes(&bincode::serialize(&changed_merkle).unwrap(), &vk)
+        .is_err());
+
+    let mut changed_vk = deserialize_vk_bytes(&vk).unwrap();
+    changed_vk.vk.pc_start += SCField::one();
+    assert!(verifier
+        .verify_compressed_bytes(&proof, &bincode::serialize(&changed_vk).unwrap())
+        .is_err());
+    let mut invalid_vk_identity = changed_vk.clone();
+    invalid_vk_identity.vk.global146_identity[0] ^= 1;
+    assert!(verifier
+        .verify_compressed_bytes(&proof, &bincode::serialize(&invalid_vk_identity).unwrap())
+        .is_err());
+
+    // Explicit release tooling may export negatives for the Node/browser WASM gate.
+    if let Some(dir) = std::env::var_os("DT_EXPORT_NEGATIVE_FIXTURES") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in [
+            ("current-elided.bin", elided_bytes),
+            (
+                "changed-public.bin",
+                bincode::serialize(&changed_public).unwrap(),
+            ),
+            (
+                "changed-root-vk.bin",
+                bincode::serialize(&changed_root_vk).unwrap(),
+            ),
+            (
+                "changed-sumcheck.bin",
+                bincode::serialize(&changed_sumcheck).unwrap(),
+            ),
+            (
+                "changed-merkle.bin",
+                bincode::serialize(&changed_merkle).unwrap(),
+            ),
+            ("wrong-vk.bin", bincode::serialize(&changed_vk).unwrap()),
+        ] {
+            std::fs::write(dir.join(name), bytes).unwrap();
         }
     }
+    verifier.verify_compressed_bytes(&proof, &vk).unwrap();
 }
 
 #[test]
-fn e2e_verify_compressed_proof() {
-    if !has_fixtures() {
-        eprintln!(
-            "Fixture files (proof.bin, vk-full.bin) not found at {}. \
-             Run `gen_verifier_fixtures` to generate them. Skipping.",
-            project_root().display()
-        );
-        return;
+fn rejects_malformed_wire_and_resource_amplification() {
+    let (proof, vk) = fixtures();
+    let verifier = CompressedVerifier::new().unwrap();
+    for len in [0, 1, 4, 35, 36, 256, proof.len() - 1] {
+        assert!(verifier
+            .verify_compressed_bytes(&proof[..len], &vk)
+            .is_err());
     }
-
-    let result = verify_compressed_bytes(&load_proof_bytes(), &load_vk_bytes());
-    assert!(
-        result.is_ok(),
-        "E2E verification failed: {:?}",
-        result.err()
-    );
+    let mut trailing = proof.clone();
+    trailing.push(0);
+    assert!(verifier.verify_compressed_bytes(&trailing, &vk).is_err());
+    let mut wrong_wire = proof.clone();
+    wrong_wire[..4].copy_from_slice(&12u32.to_le_bytes());
+    assert!(verifier.verify_compressed_bytes(&wrong_wire, &vk).is_err());
+    let mut wrong_identity = proof.clone();
+    wrong_identity[4] ^= 1;
+    assert!(verifier
+        .verify_compressed_bytes(&wrong_identity, &vk)
+        .is_err());
+    let mut trailing_vk = vk.clone();
+    trailing_vk.push(0);
+    assert!(verifier
+        .verify_compressed_bytes(&proof, &trailing_vk)
+        .is_err());
+    assert!(verifier.verify_compressed_bytes(&proof, &vk[..32]).is_err());
+    assert!(verifier
+        .verify_compressed_bytes(&vec![0; MAX_PROOF_BYTES + 1], &vk)
+        .is_err());
+    assert!(verifier
+        .verify_compressed_bytes(&proof, &vec![0; MAX_VK_BYTES + 1])
+        .is_err());
+    let old = include_bytes!("fixtures/legacy-elided.bin");
+    assert!(verifier.verify_compressed_bytes(old, &vk).is_err());
+    verifier.verify_compressed_bytes(&proof, &vk).unwrap();
 }
 
 #[test]
-fn e2e_vk_hash_deterministic() {
-    if !has_fixtures() {
-        return;
-    }
-
-    let h1 = load_vk_digest_u32();
-    let h2 = load_vk_digest_u32();
-    assert_eq!(h1, h2, "VK hash should be deterministic across calls");
-}
-
-#[test]
-fn e2e_message_readable() {
-    let msg_path = project_root().join("message.bin");
-    if !msg_path.exists() {
-        eprintln!("message.bin not found, skipping.");
-        return;
-    }
-
-    let bytes = std::fs::read(&msg_path).unwrap();
-    let message: String = bincode::deserialize(&bytes).unwrap();
-    assert!(!message.is_empty());
-    println!("Message: {message}");
+fn rejects_unpinned_artifacts_before_initialization() {
+    assert!(CompressedVerifier::from_artifact_bytes(&[]).is_err());
+    let mut corrupt = L4_VERIFIER_ARTIFACT.to_vec();
+    let last = corrupt.len() - 1;
+    corrupt[last] ^= 1;
+    assert!(CompressedVerifier::from_artifact_bytes(&corrupt).is_err());
+    corrupt.push(0);
+    assert!(CompressedVerifier::from_artifact_bytes(&corrupt).is_err());
 }

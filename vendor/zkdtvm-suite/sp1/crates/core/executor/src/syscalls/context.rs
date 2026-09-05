@@ -156,10 +156,9 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                     core::mem::take(&mut estimator.current_touched_compressed_addresses) -
                         &estimator.current_precompile_touched_compressed_addresses;
                 // Add the number of addresses that were removed from the main set.
-                let removed_len =
-                    original_len - estimator.current_touched_compressed_addresses.len();
-                estimator.current_local_mem +=
-                    usize::try_from(removed_len).expect("compressed address count exceeds usize");
+                let removed = original_len - estimator.current_touched_compressed_addresses.len();
+                estimator.current_local_mem += usize::try_from(removed)
+                    .expect("removed compressed-address count exceeds usize");
             }
         }
 

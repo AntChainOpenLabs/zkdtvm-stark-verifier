@@ -2473,6 +2473,7 @@ dependencies = [
  "polyair",
  "serde",
  "tracing",
+ "web-time",
  "whir-pcs",
 ]
 
@@ -2866,6 +2867,7 @@ dependencies = [
  "strum_macros",
  "sysinfo",
  "tracing",
+ "web-time",
  "whir-pcs",
 ]
 
@@ -4282,6 +4284,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -4652,6 +4655,7 @@ dependencies = [
  "dt-stark",
  "native-recursion",
  "serde",
+ "sha2",
  "tracing",
 ]
 

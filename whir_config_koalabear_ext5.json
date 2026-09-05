@@ -53,7 +53,7 @@
   },
   "shrink": {
     "log_blowup": 3,
-    "num_queries": 130,
+    "num_queries": 131,
     "grinding_bits_query": 20,
     "grinding_bits_batching": 10,
     "stacking": false,
@@ -66,7 +66,7 @@
     "grinding_bits_folding": 20,
     "log_final_poly_len": 6,
     "num_committed_groups": 3,
-    "round_query_counts": [77, 38, 26],
+    "round_query_counts": [67, 36, 24],
     "stack_log_height": 18,
     "stacking": true,
     "path_pruning": true

@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn persistent_registry_keeps_exactly_28_families() {
-        assert_eq!(NATIVE_AIR_REGISTRY_VERSION, 16);
+        assert_eq!(NATIVE_AIR_REGISTRY_VERSION, 13);
         assert_eq!(NativeAirFamily::ALL.len(), 28);
         assert!(
             NativeAirFamily::ALL.iter().all(|family| !format!("{family:?}").contains("FoldPlan")),
